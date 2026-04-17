@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+.venv
+env/
+ENV/
+
+# C++ binaries
+*.exe
+*.o
+*.obj
+*.out
+
+# Models and data (optional, but recommended to ignore if large)
+*.pkl
+# static_ml_model.pkl  # Uncomment if you specifically want to include this model
+
+# IDE settings
+.vscode/
+.idea/
+.gemini/
