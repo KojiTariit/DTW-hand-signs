@@ -78,6 +78,35 @@ public:
                 } else {
                    f.push_back(0); f.push_back(0);
                 }
+
+                // 5. FACE DISTANCES (For differentiating signs placed at forehead vs chin)
+                if (sequence[i].has_face) {
+                    Point3D abs_thumb = {hand.wrist_pos.x + hand.landmarks[4].x, hand.wrist_pos.y + hand.landmarks[4].y, hand.wrist_pos.z + hand.landmarks[4].z};
+                    // Forehead to Thumb (LM 4)
+                    float d1 = std::sqrt(std::pow(abs_thumb.x - sequence[i].face.forehead.x, 2) + 
+                                         std::pow(abs_thumb.y - sequence[i].face.forehead.y, 2) + 
+                                         std::pow(abs_thumb.z - sequence[i].face.forehead.z, 2));
+                    // Chin to Thumb (LM 4)
+                    float d2 = std::sqrt(std::pow(abs_thumb.x - sequence[i].face.chin.x, 2) + 
+                                         std::pow(abs_thumb.y - sequence[i].face.chin.y, 2) + 
+                                         std::pow(abs_thumb.z - sequence[i].face.chin.z, 2));
+                    // Forehead to Wrist
+                    float d3 = std::sqrt(std::pow(hand.wrist_pos.x - sequence[i].face.forehead.x, 2) + 
+                                         std::pow(hand.wrist_pos.y - sequence[i].face.forehead.y, 2) + 
+                                         std::pow(hand.wrist_pos.z - sequence[i].face.forehead.z, 2));
+                    // Chin to Wrist
+                    float d4 = std::sqrt(std::pow(hand.wrist_pos.x - sequence[i].face.chin.x, 2) + 
+                                         std::pow(hand.wrist_pos.y - sequence[i].face.chin.y, 2) + 
+                                         std::pow(hand.wrist_pos.z - sequence[i].face.chin.z, 2));
+                    
+                    // Boosted weight by 8.0f to ensure placing the hand near the face strongly affects DTW score
+                    f.push_back(d1 * 8.0f); 
+                    f.push_back(d2 * 8.0f);
+                    f.push_back(d3 * 8.0f);
+                    f.push_back(d4 * 8.0f);
+                } else {
+                    f.push_back(0.0f); f.push_back(0.0f); f.push_back(0.0f); f.push_back(0.0f);
+                }
             }
             // If it's a 2-hand sign, the feature vector will be 2x longer automatically.
             // DTW will naturally fail a 1-hand live sign against a 2-hand template because the vector lengths won't match!
@@ -106,8 +135,17 @@ public:
         for (size_t i = 1; i < seq.size(); ++i) {
             std::vector<float> d;
             size_t dim = std::min(seq[i].size(), seq[i-1].size());
+            float mag = 0.0f;
             for (size_t k = 0; k < dim; ++k) {
-                d.push_back(seq[i][k] - seq[i-1][k]); // Velocity = Current - Previous
+                float val = seq[i][k] - seq[i-1][k]; // Velocity = Current - Previous
+                d.push_back(val);
+                mag += val * val;
+            }
+            // Z vs J Fix: Normalize velocity into a pure Directional Unit Vector. 
+            // Ensures fast-Z and slow-Z have identical mathematical direction rays.
+            mag = std::sqrt(mag) + 1e-6f;
+            for (auto& val : d) {
+                val /= mag;
             }
             derivatives.push_back(d);
         }

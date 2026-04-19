@@ -7,14 +7,17 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 import joblib
 
-def extract_features(hand_data):
+def extract_features(frame):
     """
-    HYBRID CORE (44 Features):
-    1. Wrist-Relative Distances (20) - The "Big Picture"
-    2. Finger Extension Ratios (5) - Curl Detection
-    3. Fingertip Spreads (4) - U vs V Detection
-    4. Joint Angles (15) - Fine Pose
+    HYBRID CORE (58 Features - Sniper Optimized):
+    1. Wrist-Relative Distances (20)
+    2. Finger Extension Ratios (5)
+    3. Joint Angles (15)
+    4. Face Context (4)
+    5. Full Tip Matrix (10)       -> Solves U vs V spacing.
+    6. Thumb-Cross Matrix (4)     -> Solves A vs S wrapping.
     """
+    hand_data = frame["hands"][0]
     lms = hand_data['landmarks']
     pts = np.array([[lm['x'], lm['y'], lm['z']] for lm in lms])
     
@@ -25,21 +28,17 @@ def extract_features(hand_data):
 
     features = []
 
-    # 1. Wrist-Relative Distances (20 features) - BACK IN!
+    # 1. Wrist-Relative Distances (20 features)
     for i in range(1, 21):
-        features.append(np.linalg.norm(pts[i] - p0) / hand_size)
+        features.append(float(np.linalg.norm(pts[i] - p0) / hand_size))
 
-    # 2. Finger Extension Ratios (5 features)
+    # 2. Finger Extension Ratios (5) - Curl Detection
     tips = [4, 8, 12, 16, 20]
     mcps = [2, 5, 9, 13, 17]
     for t, m in zip(tips, mcps):
-        features.append(np.linalg.norm(pts[t] - pts[m]) / (np.linalg.norm(pts[m] - p0) + 1e-6))
+        features.append(float(np.linalg.norm(pts[t] - pts[m]) / (np.linalg.norm(pts[m] - p0) + 1e-6)))
 
-    # 3. Tip Spreads (4 features)
-    for i in range(4):
-        features.append(np.linalg.norm(pts[tips[i]] - pts[tips[i+1]]) / hand_size)
-
-    # 4. Joint Angles (15 features)
+    # 3. Joint Angles (15 features)
     chains = [[0,1,2,3,4],[0,5,6,7,8],[0,9,10,11,12],[0,13,14,15,16],[0,17,18,19,20]]
     for chain in chains:
         for i in range(1, 4):
@@ -48,21 +47,53 @@ def extract_features(hand_data):
             cos = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
             features.append(float(cos))
 
+    # 4. Face Context (4 features)
+    if frame.get("face"):
+        face = frame["face"]
+        fh = np.array([face['forehead']['x'], face['forehead']['y'], face['forehead']['z']])
+        ch = np.array([face['chin']['x'], face['chin']['y'], face['chin']['z']])
+        
+        wrist_pos = hand_data['wrist_pos']
+        w_abs = np.array([wrist_pos['x'], wrist_pos['y'], wrist_pos['z']])
+        thumb_abs = pts[4] + w_abs
+        wrist_abs = p0 + w_abs
+        
+        d1 = float(np.linalg.norm(thumb_abs - fh))
+        d2 = float(np.linalg.norm(thumb_abs - ch))
+        d3 = float(np.linalg.norm(wrist_abs - fh))
+        d4 = float(np.linalg.norm(wrist_abs - ch))
+        features.extend([d1, d2, d3, d4])
+    else:
+        features.extend([0.0, 0.0, 0.0, 0.0])
+
+    # 5. Full Tip Matrix (10 features) - Solves U vs V natively
+    for i in range(len(tips)):
+        for j in range(i+1, len(tips)):
+            features.append(float(np.linalg.norm(pts[tips[i]] - pts[tips[j]]) / hand_size))
+
+    # 6. Thumb-Cross Matrix (4 features) - Solves A vs S natively
+    cross_pips = [6, 10, 14, 18]
+    for m in cross_pips:
+        features.append(float(np.linalg.norm(pts[4] - pts[m]) / hand_size))
+
     return features
 
 def main():
-    print("=== Signs Sense: HYBRID TRAINER (44 Features) ===")
-    static_dir = r"c:/Users/USER/Desktop/DTW/templates/Train_case/static/"
+    print("=== Signs Sense: HYBRID TRAINER (58 Features 'Sniper Core') ===")
+    static_dir = r"c:/Users/USER/Desktop/DTW/templates/static/"
     files = sorted(glob.glob(os.path.join(static_dir, "*.json")))
     
     X, y = [], []
     for f in files:
         sign = os.path.basename(f).split('.')[0].split('_')[0]
         with open(f, 'r') as jf:
-            for frame in json.load(jf):
-                if frame.get("hands"):
-                    X.append(extract_features(frame["hands"][0]))
-                    y.append(sign)
+            try:
+                for frame in json.load(jf):
+                    if frame.get("hands"):
+                        X.append(extract_features(frame))
+                        y.append(sign)
+            except Exception as e:
+                print(f"Skipping corrupt or empty file: {f}")
 
     X, y = np.array(X), np.array(y)
     clf = RandomForestClassifier(n_estimators=100, max_depth=20, random_state=42)

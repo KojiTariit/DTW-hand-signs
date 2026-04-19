@@ -9,8 +9,9 @@ from collections import defaultdict
 # 1. FEATURE EXTRACTION (Matches C++ Logic)
 # ==========================================
 
-def extract_ml_features(hand_data):
-    """HYBRID CORE (44 Features)"""
+def extract_ml_features(frame):
+    """HYBRID CORE (58 Features - Sniper Optimized)"""
+    hand_data = frame["hands"][0]
     lms = hand_data['landmarks']
     pts = np.array([[lm['x'], lm['y'], lm['z']] for lm in lms])
     
@@ -23,19 +24,15 @@ def extract_ml_features(hand_data):
 
     # 1. Wrist-Relative Distances (20)
     for i in range(1, 21):
-        features.append(np.linalg.norm(pts[i] - p0) / hand_size)
+        features.append(float(np.linalg.norm(pts[i] - p0) / hand_size))
 
-    # 2. Finger Extension Ratios (5)
+    # 2. Finger Extension Ratios (5) - Curl Detection
     tips = [4, 8, 12, 16, 20]
     mcps = [2, 5, 9, 13, 17]
     for t, m in zip(tips, mcps):
-        features.append(np.linalg.norm(pts[t] - pts[m]) / (np.linalg.norm(pts[m] - p0) + 1e-6))
+        features.append(float(np.linalg.norm(pts[t] - pts[m]) / (np.linalg.norm(pts[m] - p0) + 1e-6)))
 
-    # 3. Tip Spreads (4)
-    for i in range(4):
-        features.append(np.linalg.norm(pts[tips[i]] - pts[tips[i+1]]) / hand_size)
-
-    # 4. Joint Angles (15)
+    # 3. Joint Angles (15)
     chains = [[0,1,2,3,4],[0,5,6,7,8],[0,9,10,11,12],[0,13,14,15,16],[0,17,18,19,20]]
     for chain in chains:
         for i in range(1, 4):
@@ -43,6 +40,29 @@ def extract_ml_features(hand_data):
             bc = pts[chain[i+1]] - pts[chain[i]]
             cos = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
             features.append(float(cos))
+
+    # 4. Face Context (4)
+    if frame.get("face"):
+        face = frame["face"]
+        fh = np.array([face['forehead']['x'], face['forehead']['y'], face['forehead']['z']])
+        ch = np.array([face['chin']['x'], face['chin']['y'], face['chin']['z']])
+        d1 = float(np.linalg.norm(pts[4] - fh))
+        d2 = float(np.linalg.norm(pts[4] - ch))
+        d3 = float(np.linalg.norm(p0 - fh))
+        d4 = float(np.linalg.norm(p0 - ch))
+        features.extend([d1, d2, d3, d4])
+    else:
+        features.extend([0.0, 0.0, 0.0, 0.0])
+
+    # 5. Full Tip Matrix (10 features) - Solves U vs V natively
+    for i in range(len(tips)):
+        for j in range(i+1, len(tips)):
+            features.append(float(np.linalg.norm(pts[tips[i]] - pts[tips[j]]) / hand_size))
+
+    # 6. Thumb-Cross Matrix (4 features) - Solves A vs S natively
+    cross_pips = [6, 10, 14, 18]
+    for m in cross_pips:
+        features.append(float(np.linalg.norm(pts[4] - pts[m]) / hand_size))
 
     return features
 
@@ -198,7 +218,7 @@ def run_simulation():
             if router_pred == "static":
                 mid_frame = sequence[len(sequence)//2]
                 if mid_frame['hands']:
-                    feat = extract_ml_features(mid_frame['hands'][0])
+                    feat = extract_ml_features(mid_frame)
                     prediction = clf.predict([feat])[0]
             else:
                 live_feat = extract_dtw_features(sequence)
