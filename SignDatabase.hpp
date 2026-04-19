@@ -11,14 +11,19 @@
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 
+struct SignTemplate {
+    std::string name;
+    std::string category;
+    std::string hand_count;
+    std::vector<std::vector<float>> features;
+};
+
 class SignDatabase {
 public:
-    // A map partitioned by CATEGORY (e.g., "movement", "static")
-    // categorize_templates["static"]["A"] = ...
-    std::map<std::string, std::map<std::string, std::vector<std::vector<float>>>> categorized_templates;
+    std::vector<SignTemplate> templates;
 
     void loadFromDirectory(const std::string& rootPath) {
-        categorized_templates.clear();
+        templates.clear();
         std::cout << "--- Scanning Database: " << rootPath << " ---" << std::endl;
 
         if (!fs::exists(rootPath)) {
@@ -26,25 +31,24 @@ public:
             return;
         }
 
-        // Recursive directory iterator finds files in EVERY subfolder!
         for (const auto& entry : fs::recursive_directory_iterator(rootPath)) {
             if (entry.is_regular_file() && entry.path().extension() == ".json") {
                 
                 std::string signName = entry.path().stem().string();
-                std::string category = entry.path().parent_path().filename().string();
+                std::string hand_count = entry.path().parent_path().filename().string();
+                std::string category = entry.path().parent_path().parent_path().filename().string();
                 
                 std::vector<Frame> sequence = loadJsonFile(entry.path().string());
                 
                 if (!sequence.empty()) {
-                    categorized_templates[category][signName] = DtwEngine::extractFeatures(sequence);
-                    std::cout << "[LOADED] " << category << "/" << signName << " (" << sequence.size() << " frames)" << std::endl;
+                    auto features = DtwEngine::extractFeatures(sequence);
+                    templates.push_back({signName, category, hand_count, features});
+                    std::cout << "[LOADED] " << category << "/" << hand_count << "/" << signName << " (" << sequence.size() << " frames)" << std::endl;
                 }
             }
         }
         
-        int total_signs = 0;
-        for (const auto& cat : categorized_templates) total_signs += cat.second.size();
-        std::cout << "--- Scan Complete. Total Signs: " << total_signs << " ---" << std::endl;
+        std::cout << "--- Scan Complete. Total Signs: " << templates.size() << " ---" << std::endl;
     }
 
 private:

@@ -81,7 +81,7 @@ def extract_features(frame):
 def main():
     print("=== Signs Sense: HYBRID TRAINER (58 Features 'Sniper Core') ===")
     static_dir = r"c:/Users/USER/Desktop/DTW/templates/static/"
-    files = sorted(glob.glob(os.path.join(static_dir, "*.json")))
+    files = sorted(glob.glob(os.path.join(static_dir, "**/*.json"), recursive=True))
     
     X, y = [], []
     for f in files:

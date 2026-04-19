@@ -152,10 +152,18 @@ def main():
             cat_choice = input("Enter 1 or 2: ").strip()
             
             category = "static" if cat_choice == "1" else "movement"
+            
+            print("\nSelect Number of Hands:")
+            print("1. single_hand")
+            print("2. 2_hands")
+            choices = input("Enter 1 or 2: ").strip()
+            
+            num_hand = "single_hand" if choices == "1" else "2_hands"
+
             filename = input("Enter sign name: ").strip()
             
             # Final Path: templates/{purpose}/{category}/{name}.json
-            dir_path = f"c:/Users/USER/Desktop/DTW/templates/{category}"
+            dir_path = f"c:/Users/USER/Desktop/DTW/templates/{category}/{num_hand}"
             os.makedirs(dir_path, exist_ok=True)
             
             filepath = f"{dir_path}/{filename}.json"

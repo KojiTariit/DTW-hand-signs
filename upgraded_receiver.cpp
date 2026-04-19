@@ -185,14 +185,22 @@ int main() {
                         if (is_dynamic) {
                             std::cout << "  >> Route: DYNAMIC (DTW Processor w/ Face Context) <<" << std::endl;
                             float min_dist = 9999.0f;
-                            // Search all words in movement folder
-                            if (db.categorized_templates.count("movement")) {
-                                auto live_feat = DtwEngine::extractFeatures(current_sign_buffer);
-                                for (auto const& [name, template_feat] : db.categorized_templates.at("movement")) {
-                                    float dist = DtwEngine::computeDualScore(live_feat, template_feat, 0.4f);
+                            // Search all words in movement folder and prune by hand count
+                            auto live_feat = DtwEngine::extractFeatures(current_sign_buffer);
+                            for (const auto& tpl : db.templates) {
+                                if (tpl.category == "movement") {
+                                    // Hand Count Pruning
+                                    if (max_hands == 1 && tpl.hand_count == "2_hands") {
+                                        continue; // Prune 2-handed signs if only 1 hand is visible
+                                    }
+                                    if (max_hands >= 2 && tpl.hand_count == "single_hand") {
+                                        continue; // Optional: Prune 1-handed signs if 2 hands are actively visible
+                                    }
+
+                                    float dist = DtwEngine::computeDualScore(live_feat, tpl.features, 0.4f);
                                     if (dist < min_dist) {
                                         min_dist = dist;
-                                        winner = name;
+                                        winner = tpl.name;
                                     }
                                 }
                             }
