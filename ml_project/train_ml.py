@@ -96,7 +96,7 @@ def main():
                 print(f"Skipping corrupt or empty file: {f}")
 
     X, y = np.array(X), np.array(y)
-    clf = RandomForestClassifier(n_estimators=100, max_depth=20, random_state=42)
+    clf = RandomForestClassifier(n_estimators=200, max_depth=20, random_state=42)
     clf.fit(X, y)
     
     print(f"Training complete. Features: {len(X[0])}. Self-Accuracy: {accuracy_score(y, clf.predict(X)) * 100:.2f}%")
