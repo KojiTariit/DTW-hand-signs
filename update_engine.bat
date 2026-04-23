@@ -30,16 +30,16 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo 3/3 [COMPILING] Baking new brain into upgraded_receiver.exe...
-echo NOTE: Make sure upgraded_receiver.exe is CLOSED!
+echo 3/3 [COMPILING] Baking new brain into scrap_receiver.exe...
+echo NOTE: Make sure scrap_receiver.exe is CLOSED!
 
-g++ -O3 upgraded_receiver.cpp -o upgraded_receiver.exe -lws2_32
+g++ -O3 scrap_receiver.cpp -o scrap_receiver.exe -lws2_32
 
 
 
 if %ERRORLEVEL% NEQ 0 (
     echo !! Compilation Failed !!
-    echo Check if upgraded_receiver.exe is still open.
+    echo Check if scrap_receiver.exe is still open.
     pause
     exit /b %ERRORLEVEL%
 )

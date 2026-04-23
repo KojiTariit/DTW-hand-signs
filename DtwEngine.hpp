@@ -55,28 +55,36 @@ public:
                 if (sequence[i].hands.size() > h_idx) {
                     const auto& hand = sequence[i].hands[h_idx];
                     
-                    // 1. HANDSHAPE: 21 relative landmarks (Internal Scale already handled)
+                    // --- NEW: Internal Hand Scaling ---
+                    // Calculate distance from Wrist (0) to Middle MCP (9) to serve as a persistent "Hand Ruler"
+                    float dx_h = hand.landmarks[9].x - hand.landmarks[0].x;
+                    float dy_h = hand.landmarks[9].y - hand.landmarks[0].y;
+                    float dz_h = hand.landmarks[9].z - hand.landmarks[0].z;
+                    float hand_size = std::sqrt(dx_h*dx_h + dy_h*dy_h + dz_h*dz_h);
+                    if (hand_size < 1e-6f) hand_size = 1.0f;
+
+                    // 1. HANDSHAPE: 21 relative landmarks (NORMALIZED BY HAND SIZE)
                     for (size_t j = 0; j < 21; ++j) {
                         float weight = (j == 4 || j == 8 || j == 12 || j == 16 || j == 20) ? 5.0f : 1.0f; 
                         float sq_w = std::sqrt(weight);
-                        f.push_back(hand.landmarks[j].x * sq_w);
-                        f.push_back(hand.landmarks[j].y * sq_w);
-                        f.push_back(hand.landmarks[j].z * sq_w);
+                        f.push_back((hand.landmarks[j].x / hand_size) * sq_w);
+                        f.push_back((hand.landmarks[j].y / hand_size) * sq_w);
+                        f.push_back((hand.landmarks[j].z / hand_size) * sq_w);
                     }
                     
-                    // 2. FINGER EXTENSION (Scale-Invariant Ratios)
+                    // 2. FINGER EXTENSION (NORMALIZED BY HAND SIZE)
                     int tips[] = {4, 8, 12, 16, 20};
                     for (int t : tips) {
                         float d = std::sqrt(std::pow(hand.landmarks[t].x, 2) + std::pow(hand.landmarks[t].y, 2) + std::pow(hand.landmarks[t].z, 2));
-                        f.push_back(d * 6.0f);
+                        f.push_back((d / hand_size) * 6.0f);
                     }
 
-                    // 3. FINGER SPREAD (Scale-Invariant Ratios)
+                    // 3. FINGER SPREAD (NORMALIZED BY HAND SIZE)
                     for (int j = 0; j < 4; ++j) {
                         float dx = hand.landmarks[tips[j]].x - hand.landmarks[tips[j+1]].x;
                         float dy = hand.landmarks[tips[j]].y - hand.landmarks[tips[j+1]].y;
                         float dz = hand.landmarks[tips[j]].z - hand.landmarks[tips[j+1]].z;
-                        f.push_back(std::sqrt(dx*dx + dy*dy + dz*dz) * 6.0f);
+                        f.push_back((std::sqrt(dx*dx + dy*dy + dz*dz) / hand_size) * 6.0f);
                     }
                     
                     // 4. TRAJECTORY (Relative to start frame's Nose-Relative position, Scaled by Face Height)
@@ -123,6 +131,31 @@ public:
                     for (int k = 0; k < 97; ++k) f.push_back(0.0f);
                 }
             }
+
+            // 6. INTER-HAND PROXIMITY (10 Features) - The "Tapping" Detector
+            // Measures the distance between Hand 1's tips and Hand 2's key joints.
+            if (sequence[i].hands.size() >= 2) {
+                const auto& h1 = sequence[i].hands[0];
+                const auto& h2 = sequence[i].hands[1];
+                int tips1[] = {8, 12}; // Index and Middle
+                int base2[] = {0, 5, 9, 13, 17, 8, 12}; // Wrist and MCPs and Tips of Hand 2
+                
+                for (int t1 : tips1) {
+                    // Calculate Tip 1's absolute position relative to Nose
+                    Point3D t1_nose = { h1.wrist_pos.x + h1.landmarks[t1].x, h1.wrist_pos.y + h1.landmarks[t1].y, h1.wrist_pos.z + h1.landmarks[t1].z };
+                    
+                    for (int b2 : base2) {
+                        Point3D b2_nose = { h2.wrist_pos.x + h2.landmarks[b2].x, h2.wrist_pos.y + h2.landmarks[b2].y, h2.wrist_pos.z + h2.landmarks[b2].z };
+                        float d = std::sqrt(std::pow(t1_nose.x - b2_nose.x, 2) + std::pow(t1_nose.y - b2_nose.y, 2) + std::pow(t1_nose.z - b2_nose.z, 2));
+                        f.push_back((d / face_h) * 15.0f); // HIGH WEIGHT for hand-to-hand contact
+                    }
+                }
+                // (Padding to keep feature vector consistent: 10 features total)
+                while (f.size() < (194 + 14)) f.push_back(0.0f); 
+            } else {
+                for (int k = 0; k < 14; ++k) f.push_back(0.0f);
+            }
+
             features.push_back(f);
         }
         return features;
@@ -138,9 +171,10 @@ public:
         return std::sqrt(sum);
     }
 
-    // ========== NEW: DDTW - Derivative (Velocity) Feature Extraction ==========
-    // Takes a sequence of feature vectors and returns the "velocity" between consecutive frames.
-    // Instead of "where is the finger?", this tells us "how fast is the finger moving?"
+    // ========== UPGRADED: DDTW - Raw Energy Logic ==========
+    // We now use RAW Velocity differences without normalization.
+    // This allows the engine to distinguish between 'Forceful Taps' and 'Gentle Rocks'
+    // because the mathematical 'Power' of the movement is preserved.
     static std::vector<std::vector<float>> computeDerivatives(const std::vector<std::vector<float>>& seq) {
         std::vector<std::vector<float>> derivatives;
         if (seq.size() < 2) return derivatives;
@@ -148,17 +182,9 @@ public:
         for (size_t i = 1; i < seq.size(); ++i) {
             std::vector<float> d;
             size_t dim = std::min(seq[i].size(), seq[i-1].size());
-            float mag = 0.0f;
             for (size_t k = 0; k < dim; ++k) {
-                float val = seq[i][k] - seq[i-1][k]; // Velocity = Current - Previous
+                float val = seq[i][k] - seq[i-1][k]; // Raw Velocity
                 d.push_back(val);
-                mag += val * val;
-            }
-            // Z vs J Fix: Normalize velocity into a pure Directional Unit Vector. 
-            // Ensures fast-Z and slow-Z have identical mathematical direction rays.
-            mag = std::sqrt(mag) + 1e-6f;
-            for (auto& val : d) {
-                val /= mag;
             }
             derivatives.push_back(d);
         }

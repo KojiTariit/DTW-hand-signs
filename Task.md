@@ -39,8 +39,12 @@
 
 - [ ] **Sub-Quest: Sign Translator Milestones**
     - [x] **Quest A**: The "I" vs "J" Challenge (Static vs Movement)
-    - [ ] **Quest B**: The "Name" vs "Weight" Challenge (Tapping vs Wiggling)
-    - [ ] **Quest C**: The "Ultimate Pruning" Test (Filtering unrelated signs)
+    - [x] **Quest B**: The "Name" vs "Weight" Challenge (Tapping vs Wiggling) - FIXED with Velocity Floor!
+    - [x] **Quest C**: The "Ultimate Pruning" Test (Filtering unrelated signs) - FIXED with Hand Scaling!
+
+- [x] **Feature Normalization Sync**
+    - [x] Implement internal hand-size normalization in C++ Engine.
+    - [x] Implement scale-dependent velocity normalization in DDTW.
 
 - [ ] **Sub-Quest: Continuous Fingerspelling Words**
     - [ ] Set up a separate test script to capture continuous alphabet classification.
@@ -49,4 +53,4 @@
 
 - [ ] **Sign Template Recorder**
     - [x] Create `recorder.py` to save reference JSON templates.
-    - [/] Record "Golden" templates for 'I', 'J', 'Name', 'Weight'.
+    - [x] Record "Golden" templates for 'I', 'J', 'Name', 'Weight'.
