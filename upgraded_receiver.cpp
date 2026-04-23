@@ -70,16 +70,31 @@ std::vector<float> extract_ml_features(const Frame& f) {
         }
     }
 
-    // 4. Face Metrics (4 Features)
-    if (f.has_face) {
-        Point3D abs_thumb = {hand.wrist_pos.x + lms[4].x, hand.wrist_pos.y + lms[4].y, hand.wrist_pos.z + lms[4].z};
-        Point3D abs_wrist = {hand.wrist_pos.x + p0.x, hand.wrist_pos.y + p0.y, hand.wrist_pos.z + p0.z};
-        features.push_back(magnitude(sub_points(abs_thumb, f.face.forehead)));
-        features.push_back(magnitude(sub_points(abs_thumb, f.face.chin)));
-        features.push_back(magnitude(sub_points(abs_wrist, f.face.forehead)));
-        features.push_back(magnitude(sub_points(abs_wrist, f.face.chin)));
+    // 4. Face Context (16 Semantic Probes) - Normalized by Face Height
+    if (f.has_face && f.has_pose) {
+        // Calculate face height as the normalization "ruler"
+        float face_h = magnitude(sub_points(f.face.forehead, f.face.chin));
+        if (face_h < 0.01f) face_h = 1.0f;
+        
+        // All positions are already relative to Nose origin
+        Point3D idx_rel_nose = {hand.wrist_pos.x + lms[8].x, hand.wrist_pos.y + lms[8].y, hand.wrist_pos.z + lms[8].z};
+        Point3D mid_rel_nose = {hand.wrist_pos.x + lms[12].x, hand.wrist_pos.y + lms[12].y, hand.wrist_pos.z + lms[12].z};
+        Point3D tmb_rel_nose = {hand.wrist_pos.x + lms[4].x, hand.wrist_pos.y + lms[4].y, hand.wrist_pos.z + lms[4].z};
+        Point3D wst_rel_nose = hand.wrist_pos;
+        
+        Point3D anchors[] = { f.face.forehead, f.face.chin, f.face.nose, f.face.l_cheek, f.face.r_cheek, f.pose.l_ear, f.pose.r_ear };
+        
+        // 1. Index Proximity (7)
+        for (const auto& a : anchors) features.push_back(magnitude(sub_points(idx_rel_nose, a)) / face_h);
+        // 2. Middle Proximity (7)
+        for (const auto& a : anchors) features.push_back(magnitude(sub_points(mid_rel_nose, a)) / face_h);
+        // 3. Thumb Proximity (7)
+        for (const auto& a : anchors) features.push_back(magnitude(sub_points(tmb_rel_nose, a)) / face_h);
+        // 4. Wrist Proximity (2)
+        features.push_back(magnitude(sub_points(wst_rel_nose, f.face.forehead)) / face_h);
+        features.push_back(magnitude(sub_points(wst_rel_nose, f.face.chin)) / face_h);
     } else {
-        features.push_back(0.0f); features.push_back(0.0f); features.push_back(0.0f); features.push_back(0.0f);
+        for (int i = 0; i < 23; ++i) features.push_back(0.0f);
     }
 
     // 5. Full Tip Matrix (10 Features) - Solves U vs V
@@ -107,7 +122,7 @@ int main() {
     // 1. Load the templates
     SignDatabase db;
     // We load from /templates like the hybrid receiver
-    db.loadFromDirectory("c:/Users/USER/Desktop/DTW/templates");
+    db.loadFromDirectory("c:/Users/USER/Desktop/DTW/templates/movement");
 
     // 2. Setup UDP Server
     WSADATA wsaData;
@@ -185,22 +200,18 @@ int main() {
                         if (is_dynamic) {
                             std::cout << "  >> Route: DYNAMIC (DTW Processor w/ Face Context) <<" << std::endl;
                             float min_dist = 9999.0f;
-                            // Search all words in movement folder and prune by hand count
+                            // Search all words in movement sub-folders
                             auto live_feat = DtwEngine::extractFeatures(current_sign_buffer);
-                            for (const auto& tpl : db.templates) {
-                                if (tpl.category == "movement") {
-                                    // Hand Count Pruning
-                                    if (max_hands == 1 && tpl.hand_count == "2_hands") {
-                                        continue; // Prune 2-handed signs if only 1 hand is visible
-                                    }
-                                    if (max_hands >= 2 && tpl.hand_count == "single_hand") {
-                                        continue; // Optional: Prune 1-handed signs if 2 hands are actively visible
-                                    }
-
-                                    float dist = DtwEngine::computeDualScore(live_feat, tpl.features, 0.4f);
-                                    if (dist < min_dist) {
-                                        min_dist = dist;
-                                        winner = tpl.name;
+                            
+                            std::vector<std::string> movement_folders = {"single_hand", "2_hands"};
+                            for (const auto& cat : movement_folders) {
+                                if (db.categorized_templates.count(cat)) {
+                                    for (auto const& [name, template_feat] : db.categorized_templates.at(cat)) {
+                                        float dist = DtwEngine::computeDualScore(live_feat, template_feat, 0.4f);
+                                        if (dist < min_dist) {
+                                            min_dist = dist;
+                                            winner = name;
+                                        }
                                     }
                                 }
                             }
@@ -210,23 +221,6 @@ int main() {
                             if (!mid_f.hands.empty()) {
                                 std::vector<float> full_features = extract_ml_features(mid_f);
                                 winner = StaticSignClassifier::predict(full_features);
-
-                                // --- SNIPER FILTERS (Geometric Sanity Checks) ---
-                                // 1. The "V" Spread Protector
-                                if (winner == "V") {
-                                    float spread = full_features[48]; // Index-Middle Tip Distance
-                                    if (spread < 0.32f) { // If fingers are physically too close
-                                        winner = "U";      // Fallback to closed fingers
-                                    }
-                                }
-
-                                // 2. The "D" Hook Protector
-                                if (winner == "D") {
-                                    float index_ext = full_features[21]; // Index Extension Ratio
-                                    if (index_ext < 0.65f) { // If finger is too hooked for a D
-                                        winner = "X";       // It's likely an X hook
-                                    }
-                                }
                             }
                         }
                         

@@ -13,8 +13,8 @@ def main():
     # --- 1. SETUP MODEL ---
     # Upgraded to Complexity 1 for "Pure Gold" data
     holistic = mp_holistic.Holistic(
-        model_complexity=1,
-        min_detection_confidence=0.5,
+        model_complexity=2,
+        min_detection_confidence=0.4,
         min_tracking_confidence=0.5
     )
 
@@ -74,46 +74,63 @@ def main():
                 "type": "FRAME",
                 "hands": [],
                 "face": None,
-                "ears": None,
+                "pose_anchors": None,
                 "timestamp": time.time()
             }
-            
-            # A. Hands
-            def pack_hand(lms):
+
+            # 4. Body-Centric Origin (Nose Anchor)
+            nose_lm = None
+            if results.face_landmarks:
+                nose_lm = results.face_landmarks.landmark[4]
+
+            # A. Hands (Relative to Nose)
+            def pack_hand(lms, nose):
                 wrist = lms.landmark[0]
                 frame_lms = []
                 for lm in lms.landmark:
+                    # Internal landmarks are relative to wrist
                     frame_lms.append({"x": lm.x - wrist.x, "y": lm.y - wrist.y, "z": lm.z - wrist.z})
-                return {"landmarks": frame_lms, "wrist_pos": {"x": wrist.x, "y": wrist.y, "z": wrist.z}}
+                
+                # Wrist position is relative to nose
+                return {
+                    "landmarks": frame_lms, 
+                    "wrist_pos": {
+                        "x": wrist.x - nose.x if nose else wrist.x, 
+                        "y": wrist.y - nose.y if nose else wrist.y, 
+                        "z": wrist.z - nose.z if nose else wrist.z
+                    }
+                }
 
+            # A. Always send hands — use nose_lm as origin if available, else raw position
             if results.left_hand_landmarks:
-                payload["hands"].append(pack_hand(results.left_hand_landmarks))
+                payload["hands"].append(pack_hand(results.left_hand_landmarks, nose_lm))
             if results.right_hand_landmarks:
-                payload["hands"].append(pack_hand(results.right_hand_landmarks))
+                payload["hands"].append(pack_hand(results.right_hand_landmarks, nose_lm))
 
-            # B. Face (8 Anchors)
-            if results.face_landmarks:
+            # B. Face (8 Anchors - Relative to Nose) — only if face is detected
+            if nose_lm and results.face_landmarks:
                 f = results.face_landmarks.landmark
+                n = nose_lm
                 payload["face"] = {
-                    "forehead": {"x": f[10].x, "y": f[10].y, "z": f[10].z},
-                    "chin": {"x": f[152].x, "y": f[152].y, "z": f[152].z},
-                    "nose": {"x": f[4].x, "y": f[4].y, "z": f[4].z},
-                    "l_cheek": {"x": f[234].x, "y": f[234].y, "z": f[234].z},
-                    "r_cheek": {"x": f[454].x, "y": f[454].y, "z": f[454].z},
-                    "mouth": {"x": f[13].x, "y": f[13].y, "z": f[13].z},
-                    "l_eye": {"x": f[133].x, "y": f[133].y, "z": f[133].z},
-                    "r_eye": {"x": f[362].x, "y": f[362].y, "z": f[362].z}
+                    "forehead": {"x": f[10].x - n.x, "y": f[10].y - n.y, "z": f[10].z - n.z},
+                    "chin": {"x": f[152].x - n.x, "y": f[152].y - n.y, "z": f[152].z - n.z},
+                    "nose": {"x": 0.0, "y": 0.0, "z": 0.0},
+                    "l_cheek": {"x": f[234].x - n.x, "y": f[234].y - n.y, "z": f[234].z - n.z},
+                    "r_cheek": {"x": f[454].x - n.x, "y": f[454].y - n.y, "z": f[454].z - n.z},
+                    "mouth": {"x": f[13].x - n.x, "y": f[13].y - n.y, "z": f[13].z - n.z},
+                    "l_eye": {"x": f[133].x - n.x, "y": f[133].y - n.y, "z": f[133].z - n.z},
+                    "r_eye": {"x": f[362].x - n.x, "y": f[362].y - n.y, "z": f[362].z - n.z}
                 }
 
-            # C. Ears & Shoulders (Pose Anchors)
-            if results.pose_landmarks:
-                p = results.pose_landmarks.landmark
-                payload["pose_anchors"] = {
-                    "l_ear": {"x": p[7].x, "y": p[7].y, "z": p[7].z},
-                    "r_ear": {"x": p[8].x, "y": p[8].y, "z": p[8].z},
-                    "l_shoulder": {"x": p[11].x, "y": p[11].y, "z": p[11].z},
-                    "r_shoulder": {"x": p[12].x, "y": p[12].y, "z": p[12].z}
-                }
+                # C. Ears & Shoulders (Pose Anchors - Relative to Nose)
+                if results.pose_landmarks:
+                    p = results.pose_landmarks.landmark
+                    payload["pose_anchors"] = {
+                        "l_ear": {"x": p[7].x - n.x, "y": p[7].y - n.y, "z": p[7].z - n.z},
+                        "r_ear": {"x": p[8].x - n.x, "y": p[8].y - n.y, "z": p[8].z - n.z},
+                        "l_shoulder": {"x": p[11].x - n.x, "y": p[11].y - n.y, "z": p[11].z - n.z},
+                        "r_shoulder": {"x": p[12].x - n.x, "y": p[12].y - n.y, "z": p[12].z - n.z}
+                    }
 
             # Stream even if zero hands (to keep temporal alignment)
             sock.sendto(json.dumps(payload).encode('utf-8'), server_address)

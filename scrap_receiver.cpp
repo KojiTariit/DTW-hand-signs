@@ -28,7 +28,7 @@ float dist3D(Point3D a, Point3D b) {
 }
 
 // --- 2. X-RAY MACHINE LEARNING EXTRACTOR ---
-// Extracted features MUST exactly match train_ml.py (Pairwise Distances + Angles)
+// Extracts exactly what m2cgen expects (77 features)
 std::vector<float> extract_ml_features(const Frame& f) {
     std::vector<float> features;
     if (f.hands.empty()) return features;
@@ -46,21 +46,16 @@ std::vector<float> extract_ml_features(const Frame& f) {
         features.push_back(magnitude(sub_points(lms[i], p0)) / hand_size);
     }
 
-    // 2. Finger Extension Ratios (5)
-    int tips[] = {4, 8, 12, 16, 20};
-    int mcps[] = {2, 5, 9, 13, 17};
+    // 2. Finger Extension Ratios (5 Features) - Curl Detection
+    int curltips[] = {4, 8, 12, 16, 20};
+    int curlmcps[] = {2, 5, 9, 13, 17};
     for (int i = 0; i < 5; ++i) {
-        float tip_to_mcp = magnitude(sub_points(lms[tips[i]], lms[mcps[i]]));
-        float mcp_to_wrist = magnitude(sub_points(lms[mcps[i]], p0));
-        features.push_back(tip_to_mcp / (mcp_to_wrist + 1e-6f));
+        float dist_tip_mcp = magnitude(sub_points(lms[curltips[i]], lms[curlmcps[i]]));
+        float dist_mcp_wrist = magnitude(sub_points(lms[curlmcps[i]], p0));
+        features.push_back(dist_tip_mcp / (dist_mcp_wrist + 1e-6f));
     }
 
-    // 3. Tip Spreads (4)
-    for (int i = 0; i < 4; ++i) {
-        features.push_back(magnitude(sub_points(lms[tips[i]], lms[tips[i+1]])) / hand_size);
-    }
-
-    // 4. Joint Angles (15 Features)
+    // 3. Joint Angles (15 Features)
     int chains[5][5] = {
         {0, 1, 2, 3, 4}, {0, 5, 6, 7, 8}, {0, 9, 10, 11, 12}, 
         {0, 13, 14, 15, 16}, {0, 17, 18, 19, 20}
@@ -78,6 +73,45 @@ std::vector<float> extract_ml_features(const Frame& f) {
         }
     }
 
+    // 4. Face Context (23 Semantic Probes) - Normalized by Face Height
+    if (f.has_face && f.has_pose) {
+        float face_h = magnitude(sub_points(f.face.forehead, f.face.chin));
+        if (face_h < 0.01f) face_h = 1.0f;
+        
+        Point3D idx_rel_nose = {hand.wrist_pos.x + lms[8].x, hand.wrist_pos.y + lms[8].y, hand.wrist_pos.z + lms[8].z};
+        Point3D mid_rel_nose = {hand.wrist_pos.x + lms[12].x, hand.wrist_pos.y + lms[12].y, hand.wrist_pos.z + lms[12].z};
+        Point3D tmb_rel_nose = {hand.wrist_pos.x + lms[4].x, hand.wrist_pos.y + lms[4].y, hand.wrist_pos.z + lms[4].z};
+        Point3D wst_rel_nose = hand.wrist_pos;
+        
+        Point3D anchors[] = { f.face.forehead, f.face.chin, f.face.nose, f.face.l_cheek, f.face.r_cheek, f.pose.l_ear, f.pose.r_ear };
+        
+        for (const auto& a : anchors) features.push_back(magnitude(sub_points(idx_rel_nose, a)) / face_h);
+        for (const auto& a : anchors) features.push_back(magnitude(sub_points(mid_rel_nose, a)) / face_h);
+        for (const auto& a : anchors) features.push_back(magnitude(sub_points(tmb_rel_nose, a)) / face_h);
+        features.push_back(magnitude(sub_points(wst_rel_nose, f.face.forehead)) / face_h);
+        features.push_back(magnitude(sub_points(wst_rel_nose, f.face.chin)) / face_h);
+    } else {
+        for (int i = 0; i < 23; ++i) features.push_back(0.0f);
+    }
+
+    // 5. Full Tip Matrix (10 Features) - Solves U vs V
+    int tips[] = {4, 8, 12, 16, 20};
+    for (int i = 0; i < 5; ++i) {
+        for (int j = i + 1; j < 5; ++j) {
+            features.push_back(magnitude(sub_points(lms[tips[i]], lms[tips[j]])) / hand_size);
+        }
+    }
+
+    // 6. Thumb-Cross Matrix (8 Features) - Solves A vs S (PIPs) and M/N/T (MCPs)
+    int cross_pips[] = {6, 10, 14, 18};
+    int cross_mcps[] = {5, 9, 13, 17};
+    for (int i = 0; i < 4; ++i) {
+        features.push_back(magnitude(sub_points(lms[4], lms[cross_pips[i]])) / hand_size);
+    }
+    for (int i = 0; i < 4; ++i) {
+        features.push_back(magnitude(sub_points(lms[4], lms[cross_mcps[i]])) / hand_size);
+    }
+
     return features;
 }
 
@@ -86,9 +120,9 @@ std::vector<float> extract_ml_features(const Frame& f) {
 int main() {
     std::cout << "--- ROOT SCRAP RECEIVER ONLINE ---" << std::endl;
     
-    // 1. Load the templates (We use Train_case to prevent matching against test data)
+    // 1. Load the templates (Load ONLY your movement files; Static is already in the brain!)
     SignDatabase db;
-    db.loadFromDirectory("c:/Users/USER/Desktop/DTW/templates/Train_case");
+    db.loadFromDirectory("c:/Users/USER/Desktop/DTW/templates");
 
     // 2. Setup UDP Server
     WSADATA wsaData;
@@ -163,18 +197,24 @@ int main() {
                         bool is_dynamic = (max_wrist_dist > TH_WRIST || max_shape_variance > TH_SHAPE || max_hands >= 2);
 
                         if (is_dynamic) {
-                            std::cout << "  >> Route: DYNAMIC (DTW Processor) <<" << std::endl;
+                            std::cout << "  >> Route: DYNAMIC (DTW Processor w/ Spatial Pruning) <<" << std::endl;
                             float min_dist = 9999.0f;
-                            // The user requested simple routing without spatial pruning yet.
-                            if (db.categorized_templates.count("movement")) {
+                            
+                            // SPATIAL PRUNING: Determine folder based on hand count (e.g., "movement/2_hands")
+                            std::string target_cat = (max_hands >= 2) ? "movement/2_hands" : "movement/single_hand";
+                            std::cout << "  >> Filter: Searching [" << target_cat << "] folder only." << std::endl;
+
+                            if (db.categorized_templates.count(target_cat)) {
                                 auto live_feat = DtwEngine::extractFeatures(current_sign_buffer);
-                                for (auto const& [name, template_feat] : db.categorized_templates.at("movement")) {
+                                for (auto const& [name, template_feat] : db.categorized_templates.at(target_cat)) {
                                     float dist = DtwEngine::computeDualScore(live_feat, template_feat, 0.4f);
                                     if (dist < min_dist) {
                                         min_dist = dist;
                                         winner = name;
                                     }
                                 }
+                            } else {
+                                std::cerr << "!! Warning: Category [" << target_cat << "] not found in database!" << std::endl;
                             }
                         } else {
                             std::cout << "  >> Route: STATIC (ML Processor) <<" << std::endl;

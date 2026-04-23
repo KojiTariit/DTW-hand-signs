@@ -35,81 +35,94 @@ public:
         std::vector<std::vector<float>> features;
         if (sequence.empty()) return features;
 
-        for (size_t i = 1; i < sequence.size(); ++i) {
+        for (size_t i = 0; i < sequence.size(); ++i) {
+            if (sequence[i].hands.empty()) continue; // Skip empty frames
+
+            // Use Face Height as a "Ruler" for normalization (Scaling-Independence)
+            float face_h = 1.0f;
+            if (sequence[i].has_face) {
+                float dx = sequence[i].face.forehead.x - sequence[i].face.chin.x;
+                float dy = sequence[i].face.forehead.y - sequence[i].face.chin.y;
+                float dz = sequence[i].face.forehead.z - sequence[i].face.chin.z;
+                face_h = std::sqrt(dx*dx + dy*dy + dz*dz);
+                if (face_h < 0.01f) face_h = 1.0f; // Safety
+            }
+
             std::vector<float> f;
             
-            // For each hand present in the frame, extract its signature
-            for (const auto& hand : sequence[i].hands) {
-                // 1. HANDSHAPE: 21 relative landmarks (Weighted)
-                for (size_t j = 0; j < 21; ++j) {
-                    float weight = 1.0f;
-                    if (j == 4 || j == 8 || j == 12 || j == 16 || j == 20) weight = 5.0f; // Boosted from 3.0
-                    float sq_w = std::sqrt(weight);
-                    f.push_back(hand.landmarks[j].x * sq_w);
-                    f.push_back(hand.landmarks[j].y * sq_w);
-                    f.push_back(hand.landmarks[j].z * sq_w);
-                }
-                
-                // 2. FINGER EXTENSION
-                int tips[] = {4, 8, 12, 16, 20};
-                for (int t : tips) {
-                    float d = std::sqrt(std::pow(hand.landmarks[t].x, 2) + 
-                                       std::pow(hand.landmarks[t].y, 2) + 
-                                       std::pow(hand.landmarks[t].z, 2));
-                    f.push_back(d * 6.0f); // Boosted from 4.0
-                }
-
-                // 3. FINGER SPREAD
-                for (int j = 0; j < 4; ++j) {
-                    float dx = hand.landmarks[tips[j]].x - hand.landmarks[tips[j+1]].x;
-                    float dy = hand.landmarks[tips[j]].y - hand.landmarks[tips[j+1]].y;
-                    float dz = hand.landmarks[tips[j]].z - hand.landmarks[tips[j+1]].z;
-                    float d = std::sqrt(dx*dx + dy*dy + dz*dz);
-                    f.push_back(d * 6.0f); // Boosted from 4.0
-                }
-                
-                // 4. TRAJECTORY (Relative to start of capture)
-                // Note: Indexing into sequence[0].hands[0] assumes hand indices stay consistent
-                if (!sequence[0].hands.empty()) {
-                   float dx_traj = hand.wrist_pos.x - sequence[0].hands[0].wrist_pos.x;
-                   float dy_traj = hand.wrist_pos.y - sequence[0].hands[0].wrist_pos.y;
-                   f.push_back(dx_traj * 7.0f);
-                   f.push_back(dy_traj * 7.0f);
-                } else {
-                   f.push_back(0); f.push_back(0);
-                }
-
-                // 5. FACE DISTANCES (For differentiating signs placed at forehead vs chin)
-                if (sequence[i].has_face) {
-                    Point3D abs_thumb = {hand.wrist_pos.x + hand.landmarks[4].x, hand.wrist_pos.y + hand.landmarks[4].y, hand.wrist_pos.z + hand.landmarks[4].z};
-                    // Forehead to Thumb (LM 4)
-                    float d1 = std::sqrt(std::pow(abs_thumb.x - sequence[i].face.forehead.x, 2) + 
-                                         std::pow(abs_thumb.y - sequence[i].face.forehead.y, 2) + 
-                                         std::pow(abs_thumb.z - sequence[i].face.forehead.z, 2));
-                    // Chin to Thumb (LM 4)
-                    float d2 = std::sqrt(std::pow(abs_thumb.x - sequence[i].face.chin.x, 2) + 
-                                         std::pow(abs_thumb.y - sequence[i].face.chin.y, 2) + 
-                                         std::pow(abs_thumb.z - sequence[i].face.chin.z, 2));
-                    // Forehead to Wrist
-                    float d3 = std::sqrt(std::pow(hand.wrist_pos.x - sequence[i].face.forehead.x, 2) + 
-                                         std::pow(hand.wrist_pos.y - sequence[i].face.forehead.y, 2) + 
-                                         std::pow(hand.wrist_pos.z - sequence[i].face.forehead.z, 2));
-                    // Chin to Wrist
-                    float d4 = std::sqrt(std::pow(hand.wrist_pos.x - sequence[i].face.chin.x, 2) + 
-                                         std::pow(hand.wrist_pos.y - sequence[i].face.chin.y, 2) + 
-                                         std::pow(hand.wrist_pos.z - sequence[i].face.chin.z, 2));
+            // ALWAYS extract exactly 2 hands (156 features total)
+            for (size_t h_idx = 0; h_idx < 2; ++h_idx) {
+                if (sequence[i].hands.size() > h_idx) {
+                    const auto& hand = sequence[i].hands[h_idx];
                     
-                    // Boosted weight by 8.0f to ensure placing the hand near the face strongly affects DTW score
-                    f.push_back(d1 * 8.0f); 
-                    f.push_back(d2 * 8.0f);
-                    f.push_back(d3 * 8.0f);
-                    f.push_back(d4 * 8.0f);
+                    // 1. HANDSHAPE: 21 relative landmarks (Internal Scale already handled)
+                    for (size_t j = 0; j < 21; ++j) {
+                        float weight = (j == 4 || j == 8 || j == 12 || j == 16 || j == 20) ? 5.0f : 1.0f; 
+                        float sq_w = std::sqrt(weight);
+                        f.push_back(hand.landmarks[j].x * sq_w);
+                        f.push_back(hand.landmarks[j].y * sq_w);
+                        f.push_back(hand.landmarks[j].z * sq_w);
+                    }
+                    
+                    // 2. FINGER EXTENSION (Scale-Invariant Ratios)
+                    int tips[] = {4, 8, 12, 16, 20};
+                    for (int t : tips) {
+                        float d = std::sqrt(std::pow(hand.landmarks[t].x, 2) + std::pow(hand.landmarks[t].y, 2) + std::pow(hand.landmarks[t].z, 2));
+                        f.push_back(d * 6.0f);
+                    }
+
+                    // 3. FINGER SPREAD (Scale-Invariant Ratios)
+                    for (int j = 0; j < 4; ++j) {
+                        float dx = hand.landmarks[tips[j]].x - hand.landmarks[tips[j+1]].x;
+                        float dy = hand.landmarks[tips[j]].y - hand.landmarks[tips[j+1]].y;
+                        float dz = hand.landmarks[tips[j]].z - hand.landmarks[tips[j+1]].z;
+                        f.push_back(std::sqrt(dx*dx + dy*dy + dz*dz) * 6.0f);
+                    }
+                    
+                    // 4. TRAJECTORY (Relative to start frame's Nose-Relative position, Scaled by Face Height)
+                    bool has_orig = false;
+                    if (!sequence[0].hands.empty()) {
+                       // Movement is measured relative to where hand started IN RELATION TO THE NOSE
+                       float dx_traj = (hand.wrist_pos.x - sequence[0].hands[0].wrist_pos.x) / face_h;
+                       float dy_traj = (hand.wrist_pos.y - sequence[0].hands[0].wrist_pos.y) / face_h;
+                       f.push_back(dx_traj * 10.0f); // Boosted weight
+                       f.push_back(dy_traj * 10.0f);
+                       has_orig = true;
+                    }
+                    if (!has_orig) { f.push_back(0); f.push_back(0); }
+
+                    // 5. FACE DISTANCES (16 Semantic Probes normalized by Face Height)
+                    if (sequence[i].has_face && sequence[i].has_pose) {
+                        auto& face = sequence[i].face;
+                        auto& pIdx = sequence[i].pose; // Pose anchors for Ears
+                        
+                        Point3D anchors[] = { face.forehead, face.chin, face.nose, face.l_cheek, face.r_cheek, pIdx.l_ear, pIdx.r_ear };
+                        
+                        Point3D idx_rel_nose = { hand.wrist_pos.x + hand.landmarks[8].x, hand.wrist_pos.y + hand.landmarks[8].y, hand.wrist_pos.z + hand.landmarks[8].z };
+                        Point3D mid_rel_nose = { hand.wrist_pos.x + hand.landmarks[12].x, hand.wrist_pos.y + hand.landmarks[12].y, hand.wrist_pos.z + hand.landmarks[12].z };
+                        Point3D tmb_rel_nose = { hand.wrist_pos.x + hand.landmarks[4].x, hand.wrist_pos.y + hand.landmarks[4].y, hand.wrist_pos.z + hand.landmarks[4].z };
+
+                        auto dist_norm = [&](Point3D a, Point3D b) {
+                            return std::sqrt(std::pow(a.x - b.x, 2) + std::pow(a.y - b.y, 2) + std::pow(a.z - b.z, 2)) / face_h;
+                        };
+
+                        // 1. Index Proximity (7)
+                        for (const auto& a : anchors) f.push_back(dist_norm(idx_rel_nose, a) * 8.0f);
+                        // 2. Middle Proximity (7)
+                        for (const auto& a : anchors) f.push_back(dist_norm(mid_rel_nose, a) * 8.0f);
+                        // 3. Thumb Proximity (7)
+                        for (const auto& a : anchors) f.push_back(dist_norm(tmb_rel_nose, a) * 8.0f);
+                        // 4. Wrist Proximity (2)
+                        f.push_back(dist_norm(hand.wrist_pos, face.forehead) * 8.0f);
+                        f.push_back(dist_norm(hand.wrist_pos, face.chin) * 8.0f);
+                    } else {
+                        for (int k = 0; k < 23; ++k) f.push_back(0.0f);
+                    }
                 } else {
-                    f.push_back(0.0f); f.push_back(0.0f); f.push_back(0.0f); f.push_back(0.0f);
+                    // PADDING: 97 features for a missing hand (63sh + 5ex + 4sp + 2tr + 23fc)
+                    for (int k = 0; k < 97; ++k) f.push_back(0.0f);
                 }
             }
-            // If it's a 2-hand sign, the feature vector will be 2x longer automatically.
-            // DTW will naturally fail a 1-hand live sign against a 2-hand template because the vector lengths won't match!
             features.push_back(f);
         }
         return features;
