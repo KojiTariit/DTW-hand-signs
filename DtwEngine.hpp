@@ -85,19 +85,12 @@ public:
                         float dy = hand.landmarks[tips[j]].y - hand.landmarks[tips[j+1]].y;
                         float dz = hand.landmarks[tips[j]].z - hand.landmarks[tips[j+1]].z;
                         f.push_back((std::sqrt(dx*dx + dy*dy + dz*dz) / hand_size) * 6.0f);
-                    }
+                    } // closing brace for the for loop!
                     
-                    // 4. TRAJECTORY (Relative to start frame's Nose-Relative position, Scaled by Face Height)
-                    bool has_orig = false;
-                    if (!sequence[0].hands.empty()) {
-                       // Movement is measured relative to where hand started IN RELATION TO THE NOSE
-                       float dx_traj = (hand.wrist_pos.x - sequence[0].hands[0].wrist_pos.x) / face_h;
-                       float dy_traj = (hand.wrist_pos.y - sequence[0].hands[0].wrist_pos.y) / face_h;
-                       f.push_back(dx_traj * 10.0f); // Boosted weight
-                       f.push_back(dy_traj * 10.0f);
-                       has_orig = true;
-                    }
-                    if (!has_orig) { f.push_back(0); f.push_back(0); }
+                    // 4. NOSE-RELATIVE POSITION (Directionality)
+                    // Instead of trajectory from start, we just use absolute position relative to the nose.
+                    f.push_back((hand.wrist_pos.x / face_h) * 20.0f);
+                    f.push_back((hand.wrist_pos.y / face_h) * 20.0f);
 
                     // 5. FACE DISTANCES (16 Semantic Probes normalized by Face Height)
                     if (sequence[i].has_face && sequence[i].has_pose) {
@@ -119,39 +112,84 @@ public:
                         // 2. Middle Proximity (7)
                         for (const auto& a : anchors) f.push_back(dist_norm(mid_rel_nose, a) * 8.0f);
                         // 3. Thumb Proximity (7)
-                        for (const auto& a : anchors) f.push_back(dist_norm(tmb_rel_nose, a) * 8.0f);
+                        for (const auto& a : anchors) f.push_back(dist_norm(tmb_rel_nose, a) * 25.0f); // Massive boost to Thumb Position!
                         // 4. Wrist Proximity (2)
                         f.push_back(dist_norm(hand.wrist_pos, face.forehead) * 8.0f);
                         f.push_back(dist_norm(hand.wrist_pos, face.chin) * 8.0f);
                     } else {
                         for (int k = 0; k < 23; ++k) f.push_back(0.0f);
                     }
+
+                    // --- NEW: 6. JOINT ANGLES (15 Features) ---
+                    // Scale and rotation invariant. Eliminates orientation errors.
+                    int chains[5][5] = {
+                        {0, 1, 2, 3, 4}, {0, 5, 6, 7, 8}, {0, 9, 10, 11, 12}, 
+                        {0, 13, 14, 15, 16}, {0, 17, 18, 19, 20}
+                    };
+                    for (int c = 0; c < 5; ++c) {
+                        for (int j = 1; j < 4; ++j) {
+                            Point3D a = hand.landmarks[chains[c][j-1]];
+                            Point3D b = hand.landmarks[chains[c][j]];
+                            Point3D c_pt = hand.landmarks[chains[c][j+1]];
+                            Point3D ba = {a.x - b.x, a.y - b.y, a.z - b.z};
+                            Point3D bc = {c_pt.x - b.x, c_pt.y - b.y, c_pt.z - b.z};
+                            float m_ba = std::sqrt(ba.x*ba.x + ba.y*ba.y + ba.z*ba.z);
+                            float m_bc = std::sqrt(bc.x*bc.x + bc.y*bc.y + bc.z*bc.z);
+                            float dot = (ba.x*bc.x + ba.y*bc.y + ba.z*bc.z) / (m_ba * m_bc + 1e-6f);
+                            f.push_back(dot * 4.0f); // Boost angle importance 
+                        }
+                    }
+
+                    // --- NEW: 7. PALM NORMAL VECTOR (3 Features) ---
+                    // Cross product of Wrist->Index MCP and Wrist->Pinky MCP. Tells us where the palm is pointing.
+                    Point3D v1 = {hand.landmarks[5].x - hand.landmarks[0].x, 
+                                  hand.landmarks[5].y - hand.landmarks[0].y, 
+                                  hand.landmarks[5].z - hand.landmarks[0].z};
+                    Point3D v2 = {hand.landmarks[17].x - hand.landmarks[0].x, 
+                                  hand.landmarks[17].y - hand.landmarks[0].y, 
+                                  hand.landmarks[17].z - hand.landmarks[0].z};
+                    Point3D norm = {v1.y*v2.z - v1.z*v2.y, v1.z*v2.x - v1.x*v2.z, v1.x*v2.y - v1.y*v2.x};
+                    float mag_norm = std::sqrt(norm.x*norm.x + norm.y*norm.y + norm.z*norm.z) + 1e-6f;
+                    f.push_back((norm.x / mag_norm) * 5.0f);
+                    f.push_back((norm.y / mag_norm) * 5.0f);
+                    f.push_back((norm.z / mag_norm) * 5.0f);
+
                 } else {
-                    // PADDING: 97 features for a missing hand (63sh + 5ex + 4sp + 2tr + 23fc)
-                    for (int k = 0; k < 97; ++k) f.push_back(0.0f);
+                    // PADDING: 115 features for a missing hand (63sh + 5ex + 4sp + 2tr + 23fc + 15ang + 3pm)
+                    for (int k = 0; k < 115; ++k) f.push_back(0.0f);
                 }
             }
 
-            // 6. INTER-HAND PROXIMITY (10 Features) - The "Tapping" Detector
-            // Measures the distance between Hand 1's tips and Hand 2's key joints.
+            // 6. INTER-HAND PROXIMITY (4 Features) - The "Tapping" Detector
+            // Symmetrical distance between hands. Extreme weight because this DEFINES tapping vs intact.
             if (sequence[i].hands.size() >= 2) {
                 const auto& h1 = sequence[i].hands[0];
                 const auto& h2 = sequence[i].hands[1];
-                int tips1[] = {8, 12}; // Index and Middle
-                int base2[] = {0, 5, 9, 13, 17, 8, 12}; // Wrist and MCPs and Tips of Hand 2
                 
-                for (int t1 : tips1) {
-                    // Calculate Tip 1's absolute position relative to Nose
-                    Point3D t1_nose = { h1.wrist_pos.x + h1.landmarks[t1].x, h1.wrist_pos.y + h1.landmarks[t1].y, h1.wrist_pos.z + h1.landmarks[t1].z };
-                    
-                    for (int b2 : base2) {
-                        Point3D b2_nose = { h2.wrist_pos.x + h2.landmarks[b2].x, h2.wrist_pos.y + h2.landmarks[b2].y, h2.wrist_pos.z + h2.landmarks[b2].z };
-                        float d = std::sqrt(std::pow(t1_nose.x - b2_nose.x, 2) + std::pow(t1_nose.y - b2_nose.y, 2) + std::pow(t1_nose.z - b2_nose.z, 2));
-                        f.push_back((d / face_h) * 15.0f); // HIGH WEIGHT for hand-to-hand contact
-                    }
-                }
-                // (Padding to keep feature vector consistent: 10 features total)
-                while (f.size() < (194 + 14)) f.push_back(0.0f); 
+                auto dist3d = [&](Point3D a, Point3D b) {
+                    return std::sqrt(std::pow(a.x - b.x, 2) + std::pow(a.y - b.y, 2) + std::pow(a.z - b.z, 2));
+                };
+
+                // Wrists
+                f.push_back((dist3d(h1.wrist_pos, h2.wrist_pos) / face_h) * 50.0f);
+                
+                // Index Tips
+                Point3D t1_idx = {h1.wrist_pos.x + h1.landmarks[8].x, h1.wrist_pos.y + h1.landmarks[8].y, h1.wrist_pos.z + h1.landmarks[8].z};
+                Point3D t2_idx = {h2.wrist_pos.x + h2.landmarks[8].x, h2.wrist_pos.y + h2.landmarks[8].y, h2.wrist_pos.z + h2.landmarks[8].z};
+                f.push_back((dist3d(t1_idx, t2_idx) / face_h) * 50.0f);
+                
+                // Middle Tips
+                Point3D t1_mid = {h1.wrist_pos.x + h1.landmarks[12].x, h1.wrist_pos.y + h1.landmarks[12].y, h1.wrist_pos.z + h1.landmarks[12].z};
+                Point3D t2_mid = {h2.wrist_pos.x + h2.landmarks[12].x, h2.wrist_pos.y + h2.landmarks[12].y, h2.wrist_pos.z + h2.landmarks[12].z};
+                f.push_back((dist3d(t1_mid, t2_mid) / face_h) * 50.0f);
+
+                // Thumb Tips
+                Point3D t1_tmb = {h1.wrist_pos.x + h1.landmarks[4].x, h1.wrist_pos.y + h1.landmarks[4].y, h1.wrist_pos.z + h1.landmarks[4].z};
+                Point3D t2_tmb = {h2.wrist_pos.x + h2.landmarks[4].x, h2.wrist_pos.y + h2.landmarks[4].y, h2.wrist_pos.z + h2.landmarks[4].z};
+                f.push_back((dist3d(t1_tmb, t2_tmb) / face_h) * 50.0f);
+
+                // (Padding to keep feature vector consistent: 14 features total allocated)
+                while (f.size() < (230 + 14)) f.push_back(0.0f); 
             } else {
                 for (int k = 0; k < 14; ++k) f.push_back(0.0f);
             }
@@ -183,7 +221,7 @@ public:
             std::vector<float> d;
             size_t dim = std::min(seq[i].size(), seq[i-1].size());
             for (size_t k = 0; k < dim; ++k) {
-                float val = seq[i][k] - seq[i-1][k]; // Raw Velocity
+                float val = (seq[i][k] - seq[i-1][k]) * 10.0f; // Raw Velocity Scaled
                 d.push_back(val);
             }
             derivatives.push_back(d);

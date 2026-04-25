@@ -204,17 +204,22 @@ int main() {
                             std::string target_cat = (max_hands >= 2) ? "movement/2_hands" : "movement/single_hand";
                             std::cout << "  >> Filter: Searching [" << target_cat << "] folder only." << std::endl;
 
-                            if (db.categorized_templates.count(target_cat)) {
-                                auto live_feat = DtwEngine::extractFeatures(current_sign_buffer);
-                                for (auto const& [name, template_feat] : db.categorized_templates.at(target_cat)) {
-                                    float dist = DtwEngine::computeDualScore(live_feat, template_feat, 0.4f);
-                                    if (dist < min_dist) {
-                                        min_dist = dist;
-                                        winner = name;
+                            std::vector<std::string> movement_folders = {target_cat};
+                            auto live_feat = DtwEngine::extractFeatures(current_sign_buffer);
+
+                            for (const auto& cat : movement_folders) {
+                                if (db.categorized_templates.count(cat)) {
+                                    for (auto const& [name, template_feat] : db.categorized_templates.at(cat)) {
+                                        float dist = DtwEngine::computeDualScore(live_feat, template_feat, 0.4f);
+                                        std::cout << "      -> " << name << " | Score: " << dist << std::endl;
+                                        if (dist < min_dist) {
+                                            min_dist = dist;
+                                            winner = name;
+                                        }
                                     }
+                                } else {
+                                    std::cerr << "!! Warning: Category [" << target_cat << "] not found in database!" << std::endl;
                                 }
-                            } else {
-                                std::cerr << "!! Warning: Category [" << target_cat << "] not found in database!" << std::endl;
                             }
                         } else {
                             std::cout << "  >> Route: STATIC (ML Processor) <<" << std::endl;

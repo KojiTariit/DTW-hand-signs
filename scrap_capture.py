@@ -13,7 +13,7 @@ def main():
     # --- 1. SETUP MODEL ---
     # Upgraded to Complexity 1 for "Pure Gold" data
     holistic = mp_holistic.Holistic(
-        model_complexity=2,
+        model_complexity=1,
         min_detection_confidence=0.4,
         min_tracking_confidence=0.5
     )
