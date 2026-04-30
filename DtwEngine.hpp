@@ -18,6 +18,7 @@ struct PoseAnchors {
 struct HandData {
     std::vector<Point3D> landmarks;
     Point3D wrist_pos;
+    bool is_present = false;
 };
 
 struct Frame {
@@ -36,7 +37,10 @@ public:
         if (sequence.empty()) return features;
 
         for (size_t i = 0; i < sequence.size(); ++i) {
-            if (sequence[i].hands.empty()) continue; // Skip empty frames
+            // We now support empty frames, but checking if ANY hand is present is still good
+            bool has_any_hand = false;
+            for (const auto& h : sequence[i].hands) if (h.is_present) has_any_hand = true;
+            if (!has_any_hand) continue;
 
             // Use Face Height as a "Ruler" for normalization (Scaling-Independence)
             float face_h = 1.0f;
@@ -50,9 +54,9 @@ public:
 
             std::vector<float> f;
             
-            // ALWAYS extract exactly 2 hands (156 features total)
+            // ALWAYS extract exactly 2 slots (Left=0, Right=1)
             for (size_t h_idx = 0; h_idx < 2; ++h_idx) {
-                if (sequence[i].hands.size() > h_idx) {
+                if (sequence[i].hands.size() > h_idx && sequence[i].hands[h_idx].is_present) {
                     const auto& hand = sequence[i].hands[h_idx];
                     
                     // --- NEW: Internal Hand Scaling ---
@@ -64,33 +68,36 @@ public:
                     if (hand_size < 1e-6f) hand_size = 1.0f;
 
                     // 1. HANDSHAPE: 21 relative landmarks (NORMALIZED BY HAND SIZE)
-                    for (size_t j = 0; j < 21; ++j) {
-                        float weight = (j == 4 || j == 8 || j == 12 || j == 16 || j == 20) ? 5.0f : 1.0f; 
-                        float sq_w = std::sqrt(weight);
-                        f.push_back((hand.landmarks[j].x / hand_size) * sq_w);
-                        f.push_back((hand.landmarks[j].y / hand_size) * sq_w);
-                        f.push_back((hand.landmarks[j].z / hand_size) * sq_w);
-                    }
-                    
-                    // 2. FINGER EXTENSION (NORMALIZED BY HAND SIZE)
-                    int tips[] = {4, 8, 12, 16, 20};
-                    for (int t : tips) {
-                        float d = std::sqrt(std::pow(hand.landmarks[t].x, 2) + std::pow(hand.landmarks[t].y, 2) + std::pow(hand.landmarks[t].z, 2));
-                        f.push_back((d / hand_size) * 6.0f);
-                    }
+                    if (hand.landmarks.size() >= 21) {
+                        for (size_t j = 0; j < 21; ++j) {
+                            f.push_back(hand.landmarks[j].x / hand_size);
+                            f.push_back(hand.landmarks[j].y / hand_size);
+                            f.push_back(hand.landmarks[j].z / hand_size);
+                        }
+                        
+                        // 2. FINGER EXTENSION (NORMALIZED BY HAND SIZE)
+                        int tips[] = {4, 8, 12, 16, 20};
+                        for (int t : tips) {
+                            float d = std::sqrt(std::pow(hand.landmarks[t].x, 2) + std::pow(hand.landmarks[t].y, 2) + std::pow(hand.landmarks[t].z, 2));
+                            f.push_back(d / hand_size);
+                        }
 
-                    // 3. FINGER SPREAD (NORMALIZED BY HAND SIZE)
-                    for (int j = 0; j < 4; ++j) {
-                        float dx = hand.landmarks[tips[j]].x - hand.landmarks[tips[j+1]].x;
-                        float dy = hand.landmarks[tips[j]].y - hand.landmarks[tips[j+1]].y;
-                        float dz = hand.landmarks[tips[j]].z - hand.landmarks[tips[j+1]].z;
-                        f.push_back((std::sqrt(dx*dx + dy*dy + dz*dz) / hand_size) * 6.0f);
+                        // 3. FINGER SPREAD (NORMALIZED BY HAND SIZE)
+                        for (int j = 0; j < 4; ++j) {
+                            float dx = hand.landmarks[tips[j]].x - hand.landmarks[tips[j+1]].x;
+                            float dy = hand.landmarks[tips[j]].y - hand.landmarks[tips[j+1]].y;
+                            float dz = hand.landmarks[tips[j]].z - hand.landmarks[tips[j+1]].z;
+                            f.push_back(std::sqrt(dx*dx + dy*dy + dz*dz) / hand_size);
+                        }
+                    } else {
+                        // Padding for 63 + 5 + 4 = 72 features
+                        for (int k = 0; k < 72; ++k) f.push_back(0.0f);
                     } // closing brace for the for loop!
                     
                     // 4. NOSE-RELATIVE POSITION (Directionality)
                     // Instead of trajectory from start, we just use absolute position relative to the nose.
-                    f.push_back((hand.wrist_pos.x / face_h) * 20.0f);
-                    f.push_back((hand.wrist_pos.y / face_h) * 20.0f);
+                    f.push_back((hand.wrist_pos.x / face_h) * 2.0f);
+                    f.push_back((hand.wrist_pos.y / face_h) * 2.0f);
 
                     // 5. FACE DISTANCES (16 Semantic Probes normalized by Face Height)
                     if (sequence[i].has_face && sequence[i].has_pose) {
@@ -108,51 +115,56 @@ public:
                         };
 
                         // 1. Index Proximity (7)
-                        for (const auto& a : anchors) f.push_back(dist_norm(idx_rel_nose, a) * 8.0f);
+                        for (const auto& a : anchors) f.push_back(dist_norm(idx_rel_nose, a) * 1.5f);
                         // 2. Middle Proximity (7)
-                        for (const auto& a : anchors) f.push_back(dist_norm(mid_rel_nose, a) * 8.0f);
+                        for (const auto& a : anchors) f.push_back(dist_norm(mid_rel_nose, a) * 1.5f);
                         // 3. Thumb Proximity (7)
-                        for (const auto& a : anchors) f.push_back(dist_norm(tmb_rel_nose, a) * 25.0f); // Massive boost to Thumb Position!
+                        for (const auto& a : anchors) f.push_back(dist_norm(tmb_rel_nose, a) * 1.5f);
                         // 4. Wrist Proximity (2)
-                        f.push_back(dist_norm(hand.wrist_pos, face.forehead) * 8.0f);
-                        f.push_back(dist_norm(hand.wrist_pos, face.chin) * 8.0f);
+                        f.push_back(dist_norm(hand.wrist_pos, face.forehead) * 1.5f);
+                        f.push_back(dist_norm(hand.wrist_pos, face.chin) * 1.5f);
                     } else {
                         for (int k = 0; k < 23; ++k) f.push_back(0.0f);
                     }
 
                     // --- NEW: 6. JOINT ANGLES (15 Features) ---
                     // Scale and rotation invariant. Eliminates orientation errors.
-                    int chains[5][5] = {
-                        {0, 1, 2, 3, 4}, {0, 5, 6, 7, 8}, {0, 9, 10, 11, 12}, 
-                        {0, 13, 14, 15, 16}, {0, 17, 18, 19, 20}
-                    };
-                    for (int c = 0; c < 5; ++c) {
-                        for (int j = 1; j < 4; ++j) {
-                            Point3D a = hand.landmarks[chains[c][j-1]];
-                            Point3D b = hand.landmarks[chains[c][j]];
-                            Point3D c_pt = hand.landmarks[chains[c][j+1]];
-                            Point3D ba = {a.x - b.x, a.y - b.y, a.z - b.z};
-                            Point3D bc = {c_pt.x - b.x, c_pt.y - b.y, c_pt.z - b.z};
-                            float m_ba = std::sqrt(ba.x*ba.x + ba.y*ba.y + ba.z*ba.z);
-                            float m_bc = std::sqrt(bc.x*bc.x + bc.y*bc.y + bc.z*bc.z);
-                            float dot = (ba.x*bc.x + ba.y*bc.y + ba.z*bc.z) / (m_ba * m_bc + 1e-6f);
-                            f.push_back(dot * 4.0f); // Boost angle importance 
+                    if (hand.landmarks.size() >= 21) {
+                        int chains[5][5] = {
+                            {0, 1, 2, 3, 4}, {0, 5, 6, 7, 8}, {0, 9, 10, 11, 12}, 
+                            {0, 13, 14, 15, 16}, {0, 17, 18, 19, 20}
+                        };
+                        for (int c = 0; c < 5; ++c) {
+                            for (int j = 1; j < 4; ++j) {
+                                Point3D a = hand.landmarks[chains[c][j-1]];
+                                Point3D b = hand.landmarks[chains[c][j]];
+                                Point3D c_pt = hand.landmarks[chains[c][j+1]];
+                                Point3D ba = {a.x - b.x, a.y - b.y, a.z - b.z};
+                                Point3D bc = {c_pt.x - b.x, c_pt.y - b.y, c_pt.z - b.z};
+                                float m_ba = std::sqrt(ba.x*ba.x + ba.y*ba.y + ba.z*ba.z);
+                                float m_bc = std::sqrt(bc.x*bc.x + bc.y*bc.y + bc.z*bc.z);
+                                float dot = (ba.x*bc.x + ba.y*bc.y + ba.z*bc.z) / (m_ba * m_bc + 1e-6f);
+                                f.push_back(dot);
+                            }
                         }
-                    }
 
-                    // --- NEW: 7. PALM NORMAL VECTOR (3 Features) ---
-                    // Cross product of Wrist->Index MCP and Wrist->Pinky MCP. Tells us where the palm is pointing.
-                    Point3D v1 = {hand.landmarks[5].x - hand.landmarks[0].x, 
-                                  hand.landmarks[5].y - hand.landmarks[0].y, 
-                                  hand.landmarks[5].z - hand.landmarks[0].z};
-                    Point3D v2 = {hand.landmarks[17].x - hand.landmarks[0].x, 
-                                  hand.landmarks[17].y - hand.landmarks[0].y, 
-                                  hand.landmarks[17].z - hand.landmarks[0].z};
-                    Point3D norm = {v1.y*v2.z - v1.z*v2.y, v1.z*v2.x - v1.x*v2.z, v1.x*v2.y - v1.y*v2.x};
-                    float mag_norm = std::sqrt(norm.x*norm.x + norm.y*norm.y + norm.z*norm.z) + 1e-6f;
-                    f.push_back((norm.x / mag_norm) * 5.0f);
-                    f.push_back((norm.y / mag_norm) * 5.0f);
-                    f.push_back((norm.z / mag_norm) * 5.0f);
+                        // --- NEW: 7. PALM NORMAL VECTOR (3 Features) ---
+                        // Cross product of Wrist->Index MCP and Wrist->Pinky MCP. Tells us where the palm is pointing.
+                        Point3D v1 = {hand.landmarks[5].x - hand.landmarks[0].x, 
+                                    hand.landmarks[5].y - hand.landmarks[0].y, 
+                                    hand.landmarks[5].z - hand.landmarks[0].z};
+                        Point3D v2 = {hand.landmarks[17].x - hand.landmarks[0].x, 
+                                    hand.landmarks[17].y - hand.landmarks[0].y, 
+                                    hand.landmarks[17].z - hand.landmarks[0].z};
+                        Point3D norm = {v1.y*v2.z - v1.z*v2.y, v1.z*v2.x - v1.x*v2.z, v1.x*v2.y - v1.y*v2.x};
+                        float mag_norm = std::sqrt(norm.x*norm.x + norm.y*norm.y + norm.z*norm.z) + 1e-6f;
+                        f.push_back(norm.x / mag_norm);
+                        f.push_back(norm.y / mag_norm);
+                        f.push_back(norm.z / mag_norm);
+                    } else {
+                        // Padding for 15 + 3 = 18 features
+                        for (int k = 0; k < 18; ++k) f.push_back(0.0f);
+                    }
 
                 } else {
                     // PADDING: 115 features for a missing hand (63sh + 5ex + 4sp + 2tr + 23fc + 15ang + 3pm)
@@ -162,7 +174,7 @@ public:
 
             // 6. INTER-HAND PROXIMITY (4 Features) - The "Tapping" Detector
             // Symmetrical distance between hands. Extreme weight because this DEFINES tapping vs intact.
-            if (sequence[i].hands.size() >= 2) {
+            if (sequence[i].hands.size() >= 2 && sequence[i].hands[0].is_present && sequence[i].hands[1].is_present) {
                 const auto& h1 = sequence[i].hands[0];
                 const auto& h2 = sequence[i].hands[1];
                 
@@ -170,28 +182,38 @@ public:
                     return std::sqrt(std::pow(a.x - b.x, 2) + std::pow(a.y - b.y, 2) + std::pow(a.z - b.z, 2));
                 };
 
-                // Wrists
-                f.push_back((dist3d(h1.wrist_pos, h2.wrist_pos) / face_h) * 50.0f);
+                // Wrists (Boosted weight 5.0x)
+                f.push_back((dist3d(h1.wrist_pos, h2.wrist_pos) / face_h) * 5.0f);
                 
-                // Index Tips
+                // Index Tips (Boosted weight 5.0x)
                 Point3D t1_idx = {h1.wrist_pos.x + h1.landmarks[8].x, h1.wrist_pos.y + h1.landmarks[8].y, h1.wrist_pos.z + h1.landmarks[8].z};
                 Point3D t2_idx = {h2.wrist_pos.x + h2.landmarks[8].x, h2.wrist_pos.y + h2.landmarks[8].y, h2.wrist_pos.z + h2.landmarks[8].z};
-                f.push_back((dist3d(t1_idx, t2_idx) / face_h) * 50.0f);
+                f.push_back((dist3d(t1_idx, t2_idx) / face_h) * 5.0f);
                 
                 // Middle Tips
                 Point3D t1_mid = {h1.wrist_pos.x + h1.landmarks[12].x, h1.wrist_pos.y + h1.landmarks[12].y, h1.wrist_pos.z + h1.landmarks[12].z};
                 Point3D t2_mid = {h2.wrist_pos.x + h2.landmarks[12].x, h2.wrist_pos.y + h2.landmarks[12].y, h2.wrist_pos.z + h2.landmarks[12].z};
-                f.push_back((dist3d(t1_mid, t2_mid) / face_h) * 50.0f);
+                f.push_back((dist3d(t1_mid, t2_mid) / face_h) * 5.0f);
 
                 // Thumb Tips
                 Point3D t1_tmb = {h1.wrist_pos.x + h1.landmarks[4].x, h1.wrist_pos.y + h1.landmarks[4].y, h1.wrist_pos.z + h1.landmarks[4].z};
                 Point3D t2_tmb = {h2.wrist_pos.x + h2.landmarks[4].x, h2.wrist_pos.y + h2.landmarks[4].y, h2.wrist_pos.z + h2.landmarks[4].z};
-                f.push_back((dist3d(t1_tmb, t2_tmb) / face_h) * 50.0f);
+                f.push_back((dist3d(t1_tmb, t2_tmb) / face_h) * 5.0f);
 
-                // (Padding to keep feature vector consistent: 14 features total allocated)
-                while (f.size() < (230 + 14)) f.push_back(0.0f); 
+                // --- INTERACTION CORE: 3D Relative Offsets ---
+                // Adding the vector between hands allows DDTW to see Relative Velocity.
+                // A "Tap" has huge change in delta-X/Y/Z; a "Wiggle" (Parallel) has ZERO change.
+                f.push_back((h1.wrist_pos.x - h2.wrist_pos.x) / face_h);
+                f.push_back((h1.wrist_pos.y - h2.wrist_pos.y) / face_h);
+                f.push_back((h1.wrist_pos.z - h2.wrist_pos.z) / face_h);
+                f.push_back((t1_idx.x - t2_idx.x) / face_h);
+                f.push_back((t1_idx.y - t2_idx.y) / face_h);
+                f.push_back((t1_idx.z - t2_idx.z) / face_h);
+
+                // (Padding to keep feature vector consistent: 20 features total allocated)
+                while (f.size() < (230 + 20)) f.push_back(0.0f); 
             } else {
-                for (int k = 0; k < 14; ++k) f.push_back(0.0f);
+                for (int k = 0; k < 20; ++k) f.push_back(0.0f);
             }
 
             features.push_back(f);
@@ -221,7 +243,7 @@ public:
             std::vector<float> d;
             size_t dim = std::min(seq[i].size(), seq[i-1].size());
             for (size_t k = 0; k < dim; ++k) {
-                float val = (seq[i][k] - seq[i-1][k]) * 10.0f; // Raw Velocity Scaled
+                float val = (seq[i][k] - seq[i-1][k]) * 5.0f; // Velocity scaled to balance shape
                 d.push_back(val);
             }
             derivatives.push_back(d);

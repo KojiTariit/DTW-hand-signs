@@ -11,9 +11,9 @@ def main():
     server_address = ('127.0.0.1', 5005)
 
     # --- 1. SETUP MODEL ---
-    # Upgraded to Complexity 1 for "Pure Gold" data
+    # Upgraded to Complexity 2 to perfectly match the Golden Templates!
     holistic = mp_holistic.Holistic(
-        model_complexity=1,
+        model_complexity=2,
         min_detection_confidence=0.4,
         min_tracking_confidence=0.5
     )
@@ -84,7 +84,7 @@ def main():
                 nose_lm = results.face_landmarks.landmark[4]
 
             # A. Hands (Relative to Nose)
-            def pack_hand(lms, nose):
+            def pack_hand(lms, nose, label):
                 wrist = lms.landmark[0]
                 frame_lms = []
                 for lm in lms.landmark:
@@ -93,6 +93,7 @@ def main():
                 
                 # Wrist position is relative to nose
                 return {
+                    "label": label,
                     "landmarks": frame_lms, 
                     "wrist_pos": {
                         "x": wrist.x - nose.x if nose else wrist.x, 
@@ -103,9 +104,9 @@ def main():
 
             # A. Always send hands — use nose_lm as origin if available, else raw position
             if results.left_hand_landmarks:
-                payload["hands"].append(pack_hand(results.left_hand_landmarks, nose_lm))
+                payload["hands"].append(pack_hand(results.left_hand_landmarks, nose_lm, "Left"))
             if results.right_hand_landmarks:
-                payload["hands"].append(pack_hand(results.right_hand_landmarks, nose_lm))
+                payload["hands"].append(pack_hand(results.right_hand_landmarks, nose_lm, "Right"))
 
             # B. Face (8 Anchors - Relative to Nose) — only if face is detected
             if nose_lm and results.face_landmarks:

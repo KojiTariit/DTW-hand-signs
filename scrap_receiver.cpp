@@ -6,7 +6,9 @@
 #include <cmath>
 #include "json.hpp"
 #include "SignDatabase.hpp"
-#include "ml_project/StaticSignClassifier.hpp"
+#include "DtwEngine.hpp"
+#include "StaticSignClassifier.hpp"
+#include "DynamicSignClassifier.hpp"
 
 using json = nlohmann::json;
 
@@ -32,8 +34,17 @@ float dist3D(Point3D a, Point3D b) {
 std::vector<float> extract_ml_features(const Frame& f) {
     std::vector<float> features;
     if (f.hands.empty()) return features;
-
-    const auto& hand = f.hands[0];
+    
+    const HandData* target_hand = nullptr;
+    for (const auto& h : f.hands) {
+        if (h.is_present && h.landmarks.size() >= 21) {
+            target_hand = &h;
+            break;
+        }
+    }
+    if (!target_hand) return features;
+    
+    const auto& hand = *target_hand;
     const auto& lms = hand.landmarks;
     
     Point3D p0 = lms[0];
@@ -164,8 +175,11 @@ int main() {
                         bool init_done = false;
 
                         for (const auto& f : current_sign_buffer) {
-                            max_hands = std::max(max_hands, f.hands.size());
-                            if (!init_done && !f.hands.empty()) {
+                            size_t frame_hands = 0;
+                            for (const auto& h : f.hands) if (h.is_present) frame_hands++;
+                            max_hands = std::max(max_hands, frame_hands);
+                            
+                            if (!init_done && frame_hands > 0) {
                                 for (const auto& h : f.hands) {
                                     start_wrist.push_back(h.wrist_pos);
                                     start_shape.push_back(h.landmarks);
@@ -180,7 +194,7 @@ int main() {
                                     float dz = f.hands[i].wrist_pos.z - start_wrist[i].z;
                                     max_wrist_dist = std::max(max_wrist_dist, std::sqrt(dx*dx + dy*dy + dz*dz));
 
-                                    for (size_t j = 0; j < f.hands[i].landmarks.size(); ++j) {
+                                    for (size_t j = 0; j < f.hands[i].landmarks.size() && j < start_shape[i].size(); ++j) {
                                         float sx = f.hands[i].landmarks[j].x - start_shape[i][j].x;
                                         float sy = f.hands[i].landmarks[j].y - start_shape[i][j].y;
                                         float sz = f.hands[i].landmarks[j].z - start_shape[i][j].z;
@@ -200,27 +214,95 @@ int main() {
                             std::cout << "  >> Route: DYNAMIC (DTW Processor w/ Spatial Pruning) <<" << std::endl;
                             float min_dist = 9999.0f;
                             
-                            // SPATIAL PRUNING: Determine folder based on hand count (e.g., "movement/2_hands")
-                            std::string target_cat = (max_hands >= 2) ? "movement/2_hands" : "movement/single_hand";
-                            std::cout << "  >> Filter: Searching [" << target_cat << "] folder only." << std::endl;
-
+                            // NEW SPATIAL PRUNING: Frame Thresholding
+                            int two_hand_frames = 0;
+                            for (const auto& f : current_sign_buffer) {
+                                size_t count = 0;
+                                for (const auto& h : f.hands) if (h.is_present) count++;
+                                if (count >= 2) two_hand_frames++;
+                            }
+                            
+                            std::string target_cat = (two_hand_frames >= 5) ? "movement/2_hands" : "movement/single_hand";
+                            std::cout << "  >> Filter: Searching [" << target_cat << "] folder only (2-hand frames: " << two_hand_frames << ")." << std::endl;
                             std::vector<std::string> movement_folders = {target_cat};
+
                             auto live_feat = DtwEngine::extractFeatures(current_sign_buffer);
+
+                            // --- 3.5. ML SHAPE PRE-FILTER ---
+                            std::cout << "  >> Filter: Generating ML Shape Shortlist..." << std::endl;
+                            std::map<std::string, double> shape_votes;
+                            for (size_t i = 0; i < current_sign_buffer.size(); ++i) {
+                                // STRIDE OPTIMIZATION: Every 5th frame + heavy weight on money frames
+                                if (i % 5 == 0 || i == 10 || i == 15) {
+                                    auto ml_feat = extract_ml_features(current_sign_buffer[i]);
+                                    if (ml_feat.size() == 81) {
+                                        auto probs = DynamicSignClassifier::predict_proba(ml_feat);
+                                        auto classes = DynamicSignClassifier::get_classes();
+                                        double weight = (i == 10 || i == 15) ? 5.0 : 1.0;
+                                        for (size_t j = 0; j < classes.size() && j < probs.size(); ++j) {
+                                            shape_votes[classes[j]] += probs[j] * weight;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Find Top 10 ML Candidates for Fusion
+                            std::vector<std::pair<std::string, double>> sorted_votes(shape_votes.begin(), shape_votes.end());
+                            std::sort(sorted_votes.begin(), sorted_votes.end(), [](const auto& a, const auto& b) {
+                                return a.second > b.second;
+                            });
+                            
+                            // Normalize votes to "Confidence" (0.0 to 1.0)
+                            double total_votes = 0;
+                            for (const auto& v : sorted_votes) total_votes += v.second;
+                            if (total_votes < 0.1) total_votes = 1.0;
+
+                            std::cout << "     [ML Confidence]: ";
+                            for (size_t i = 0; i < std::min((size_t)4, sorted_votes.size()); ++i) {
+                                std::cout << sorted_votes[i].first << " (" << (int)((sorted_votes[i].second/total_votes)*100) << "%), ";
+                            }
+                            std::cout << std::endl;
+
+                            // Step 2: SEMANTIC SCORE FUSION
+                            // We combine DTW (Movement) and ML (Shape) into a single Fused Score.
+                            // Fused_Score = DTW_Dist * (1.0 - ML_Bonus)
+                            // This allows high ML confidence to "save" a sign even if movement is slightly off.
+                            struct FusionCandidate { std::string name; float fused_score; float dtw_dist; float ml_bonus; };
+                            std::vector<FusionCandidate> candidates;
 
                             for (const auto& cat : movement_folders) {
                                 if (db.categorized_templates.count(cat)) {
                                     for (auto const& [name, template_feat] : db.categorized_templates.at(cat)) {
-                                        float dist = DtwEngine::computeDualScore(live_feat, template_feat, 0.4f);
-                                        std::cout << "      -> " << name << " | Score: " << dist << std::endl;
-                                        if (dist < min_dist) {
-                                            min_dist = dist;
-                                            winner = name;
-                                        }
+                                        float dtw_dist = DtwEngine::computeDualScore(live_feat, template_feat, 0.4f);
+                                        
+                                        // Calculate ML Bonus (Up to 80% discount for matching shape)
+                                        // This makes ML Shape recognition the primary driver.
+                                        float ml_bonus = 0.0f;
+                                        double vote_count = shape_votes.count(name) ? shape_votes.at(name) : 0.0;
+                                        ml_bonus = (float)(vote_count / total_votes) * 0.8f; 
+                                        
+                                        float fused = dtw_dist * (1.0f - ml_bonus);
+                                        candidates.push_back({name, fused, dtw_dist, ml_bonus});
                                     }
-                                } else {
-                                    std::cerr << "!! Warning: Category [" << target_cat << "] not found in database!" << std::endl;
                                 }
                             }
+                            
+                            // Sort by Fused Score (Lowest wins)
+                            std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
+                                return a.fused_score < b.fused_score;
+                            });
+
+                            if (!candidates.empty()) {
+                                winner = candidates[0].name;
+                                min_dist = candidates[0].dtw_dist;
+                                std::cout << "  >> [FUSION WINNER]: " << winner 
+                                          << " | Fused: " << candidates[0].fused_score 
+                                          << " (DTW: " << candidates[0].dtw_dist 
+                                          << ", ML Bonus: -" << (int)(candidates[0].ml_bonus * 100) << "%)" << std::endl;
+                            }
+
+
+
                         } else {
                             std::cout << "  >> Route: STATIC (ML Processor) <<" << std::endl;
                             const Frame& mid_f = current_sign_buffer[current_sign_buffer.size() / 2];
@@ -241,14 +323,30 @@ int main() {
                     
                     // Hands
                     if (data.contains("hands") && data["hands"].is_array()) {
+                        HandData left_hd, right_hd;
+                        left_hd.is_present = false;
+                        right_hd.is_present = false;
+                        
                         for (const auto& h : data["hands"]) {
                             HandData hd;
                             hd.wrist_pos = {h["wrist_pos"]["x"], h["wrist_pos"]["y"], h["wrist_pos"]["z"]};
-                            for (const auto& lm : h["landmarks"]) {
-                                hd.landmarks.push_back({lm["x"], lm["y"], lm["z"]});
+                            if (h.contains("landmarks") && h["landmarks"].is_array() && h["landmarks"].size() > 0) {
+                                hd.is_present = true;
+                                for (const auto& lm : h["landmarks"]) {
+                                    hd.landmarks.push_back({lm["x"], lm["y"], lm["z"]});
+                                }
+                            } else {
+                                hd.is_present = false;
                             }
-                            frame.hands.push_back(hd);
+                            
+                            if (h.contains("label") && h["label"] == "Right") {
+                                right_hd = hd;
+                            } else {
+                                left_hd = hd; // Default to Left
+                            }
                         }
+                        frame.hands.push_back(left_hd);
+                        frame.hands.push_back(right_hd);
                     }
 
                     // Face (8 points)

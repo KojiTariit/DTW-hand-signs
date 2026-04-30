@@ -15,7 +15,7 @@ def main():
     # --- 1. SETUP MODEL ---
     # Upgraded to Complexity 1 for "Pure Gold" quality data.
     holistic = mp_holistic.Holistic(
-        model_complexity=1,
+        model_complexity=2,
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5
     )
@@ -28,6 +28,7 @@ def main():
     waiting_for_hand = False
     arming_start_time = 0
     current_sequence = []    
+    current_video_frames = [] # Added for video recording
     
     print("--- Gen-2.5 Template Recorder (10-Anchor Star) ---")
     print("Commands:")
@@ -43,6 +44,7 @@ def main():
         # 320x240 is mandatory for Complexity 1 on laptops.
         image = cv2.resize(image, (320, 240))
         image = cv2.flip(image, 1)
+        raw_image = image.copy() # Store a raw copy for video recording
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
         results = holistic.process(image_rgb)
@@ -106,7 +108,7 @@ def main():
             }
             
             # A. Extract Hands (Normalized to Wrist, but Wrist is relative to NOSE)
-            def pack_hand(lms, origin_nose):
+            def pack_hand(lms, origin_nose, label):
                 wrist = lms.landmark[0]
                 frame_lms = []
                 for lm in lms.landmark:
@@ -117,14 +119,14 @@ def main():
                 if origin_nose:
                     rel_wrist = {"x": wrist.x - origin_nose.x, "y": wrist.y - origin_nose.y, "z": wrist.z - origin_nose.z}
                 
-                return {"landmarks": frame_lms, "wrist_pos": rel_wrist}
+                return {"label": label, "landmarks": frame_lms, "wrist_pos": rel_wrist}
 
             nose_lm = results.face_landmarks.landmark[4] if results.face_landmarks else None
 
             if results.left_hand_landmarks:
-                frame_data["hands"].append(pack_hand(results.left_hand_landmarks, nose_lm))
+                frame_data["hands"].append(pack_hand(results.left_hand_landmarks, nose_lm, "Left"))
             if results.right_hand_landmarks:
-                frame_data["hands"].append(pack_hand(results.right_hand_landmarks, nose_lm))
+                frame_data["hands"].append(pack_hand(results.right_hand_landmarks, nose_lm, "Right"))
 
             # B. Extract Face (8 Anchors - Relative to Nose)
             if results.face_landmarks:
@@ -155,6 +157,7 @@ def main():
                 frame_data["pose_anchors"] = None
 
             current_sequence.append(frame_data)
+            current_video_frames.append(raw_image) # Record raw frame
 
             # --- FREEZE-TO-STOP DETECTION (Auto-Stop Mapping) ---
             # This logic only runs while 'recording' is True (after hand was detected).
@@ -177,6 +180,7 @@ def main():
                 if total_move < 0.006: 
                     recording = False
                     current_sequence = current_sequence[:-12] # Trim off the frozen frames
+                    current_video_frames = current_video_frames[:-12] # Trim video too
                     print(f"Freeze detected! Auto-stopped. Final count: {len(current_sequence)}")
 
         # --- 6. DISPLAY UI ---
@@ -194,6 +198,7 @@ def main():
             if not recording and not waiting_for_hand:
                 arming_start_time = time.time()
                 current_sequence = []
+                current_video_frames = [] # Reset video buffer
                 print("Initializing Arming Timer...")
             else:
                 recording = False
@@ -218,6 +223,7 @@ def main():
                 continue
             
             trimmed_sequence = current_sequence[:last_hand_idx + 1]
+            trimmed_video = current_video_frames[:last_hand_idx + 1] # Trim video
             print(f"Auto-Trim: Removed {len(current_sequence) - len(trimmed_sequence)} trailing frames.")
 
             # --- Choice 2: Category ---
@@ -244,8 +250,27 @@ def main():
             filepath = f"{dir_path}/{filename}.json"
             with open(filepath, 'w') as f:
                 json.dump(trimmed_sequence, f)
-            print(f"Saved to {filepath}")
+            print(f"Saved JSON to {filepath}")
+
+            # --- Save Video ---
+            video_dir = dir_path.replace("/templates/", "/videos/")
+            os.makedirs(video_dir, exist_ok=True)
+            video_path = f"{video_dir}/{filename}.mp4"
+            
+            if len(trimmed_video) > 1:
+                # Calculate FPS from timestamps
+                duration = trimmed_sequence[-1]["timestamp"] - trimmed_sequence[0]["timestamp"]
+                fps = len(trimmed_sequence) / duration if duration > 0 else 30
+                
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                out = cv2.VideoWriter(video_path, fourcc, fps, (320, 240))
+                for frame in trimmed_video:
+                    out.write(frame)
+                out.release()
+                print(f"Saved Video to {video_path}")
+            
             current_sequence = []
+            current_video_frames = []
 
         elif key == ord('q'):
             break

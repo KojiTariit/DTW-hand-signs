@@ -64,23 +64,39 @@ private:
                 
                 // NEW FORMAT: "hands" is an array
                 if (item.contains("hands") && item["hands"].is_array()) {
+                    HandData left_hd, right_hd;
+                    left_hd.is_present = false;
+                    right_hd.is_present = false;
+                    
                     for (const auto& h : item["hands"]) {
                         HandData hd;
+                        hd.is_present = true;
                         hd.wrist_pos = {h["wrist_pos"]["x"], h["wrist_pos"]["y"], h["wrist_pos"]["z"]};
                         for (const auto& lm : h["landmarks"]) {
                             hd.landmarks.push_back({lm["x"], lm["y"], lm["z"]});
                         }
-                        frame.hands.push_back(hd);
+                        
+                        if (h.contains("label") && h["label"] == "Right") {
+                            right_hd = hd;
+                        } else {
+                            left_hd = hd; // Default to Left
+                        }
                     }
+                    frame.hands.push_back(left_hd);
+                    frame.hands.push_back(right_hd);
                 } 
                 // OLD FORMAT FALLBACK: "landmarks" is at top level
                 else if (item.contains("landmarks")) {
                     HandData hd;
+                    hd.is_present = true;
                     hd.wrist_pos = {item["wrist_pos"]["x"], item["wrist_pos"]["y"], item["wrist_pos"]["z"]};
                     for (const auto& lm : item["landmarks"]) {
                         hd.landmarks.push_back({lm["x"], lm["y"], lm["z"]});
                     }
-                    frame.hands.push_back(hd);
+                    HandData right_hd;
+                    right_hd.is_present = false;
+                    frame.hands.push_back(hd); // Assume Left
+                    frame.hands.push_back(right_hd); // Right is missing
                 }
 
                 // Face (8 points)
