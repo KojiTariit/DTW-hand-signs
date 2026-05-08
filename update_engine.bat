@@ -47,7 +47,7 @@ echo.
 echo 4/4 [COMPILING] Baking new brain into scrap_receiver.exe...
 echo NOTE: Make sure scrap_receiver.exe is CLOSED!
 
-g++ -O3 scrap_receiver.cpp -o scrap_receiver.exe -lws2_32
+g++ -O2 scrap_receiver.cpp -o scrap_receiver.exe -lws2_32 -Wl,--stack,16777216
 
 
 

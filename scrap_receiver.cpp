@@ -113,14 +113,10 @@ std::vector<float> extract_ml_features(const Frame& f) {
         }
     }
 
-    // 6. Thumb-Cross Matrix (8 Features) - Solves A vs S (PIPs) and M/N/T (MCPs)
+    // 6. Thumb-Cross Matrix (4 Features) - Solves A vs S (PIPs)
     int cross_pips[] = {6, 10, 14, 18};
-    int cross_mcps[] = {5, 9, 13, 17};
     for (int i = 0; i < 4; ++i) {
         features.push_back(magnitude(sub_points(lms[4], lms[cross_pips[i]])) / hand_size);
-    }
-    for (int i = 0; i < 4; ++i) {
-        features.push_back(magnitude(sub_points(lms[4], lms[cross_mcps[i]])) / hand_size);
     }
 
     return features;
@@ -128,12 +124,65 @@ std::vector<float> extract_ml_features(const Frame& f) {
 
 #pragma comment(lib, "ws2_32.lib")
 
+// --- 3. CLUSTER PRUNING BRAIN ---
+struct ClusterModel {
+    int n_clusters = 0;
+    std::vector<std::vector<float>> centroids;
+    std::vector<float> scaler_mean;
+    std::vector<float> scaler_scale;
+
+    bool load(const std::string& path) {
+        std::ifstream f(path);
+        if (!f.is_open()) return false;
+        try {
+            json data = json::parse(f);
+            n_clusters = data["n_clusters"];
+            centroids = data["centroids"].get<std::vector<std::vector<float>>>();
+            scaler_mean = data["scaler_mean"].get<std::vector<float>>();
+            scaler_scale = data["scaler_scale"].get<std::vector<float>>();
+            return true;
+        } catch (...) { return false; }
+    }
+
+    std::vector<int> getTopClusters(const std::vector<float>& features, int k = 3) {
+        if (features.size() != scaler_mean.size()) return {};
+        
+        std::vector<float> scaled(features.size());
+        for (size_t i = 0; i < features.size(); ++i) {
+            scaled[i] = (features[i] - scaler_mean[i]) / (scaler_scale[i] + 1e-6f);
+        }
+
+        std::vector<std::pair<int, float>> distances;
+        for (int i = 0; i < n_clusters; ++i) {
+            float dist = 0;
+            for (size_t j = 0; j < scaled.size(); ++j) {
+                dist += std::pow(scaled[j] - centroids[i][j], 2);
+            }
+            distances.push_back({i, std::sqrt(dist)});
+        }
+
+        std::sort(distances.begin(), distances.end(), [](const auto& a, const auto& b) {
+            return a.second < b.second;
+        });
+
+        std::vector<int> top;
+        for (int i = 0; i < std::min(k, (int)distances.size()); ++i) {
+            top.push_back(distances[i].first);
+        }
+        return top;
+    }
+};
+
 int main() {
-    std::cout << "--- ROOT SCRAP RECEIVER ONLINE ---" << std::endl;
+    std::cout << "--- SIGN RECOGNITION ENGINE V3.5 (REVOLUTION) ---" << std::endl;
     
-    // 1. Load the templates (Load ONLY your movement files; Static is already in the brain!)
     SignDatabase db;
     db.loadFromDirectory("c:/Users/USER/Desktop/DTW/templates");
+
+    ClusterModel cluster_brain;
+    bool cluster_enabled = cluster_brain.load("model_output/cluster_model.json");
+    if (cluster_enabled) std::cout << "[REVOLUTION] Cluster Pruning ENABLED (Top-3 Probing)." << std::endl;
+    else std::cout << "[WARNING] Cluster model not found. Running in Full-Scan mode." << std::endl;
 
     // 2. Setup UDP Server
     WSADATA wsaData;
@@ -232,20 +281,42 @@ int main() {
                             std::cout << "  >> Filter: Generating ML Shape Shortlist..." << std::endl;
                             std::map<std::string, double> shape_votes;
                             for (size_t i = 0; i < current_sign_buffer.size(); ++i) {
-                                // STRIDE OPTIMIZATION: Every 5th frame + heavy weight on money frames
+                                // STRIDE OPTIMIZATION: Every 5th frame + heavy weight on "Money Frames"
                                 if (i % 5 == 0 || i == 10 || i == 15) {
                                     auto ml_feat = extract_ml_features(current_sign_buffer[i]);
-                                    if (ml_feat.size() == 81) {
+                                    if (ml_feat.size() == 77) {
                                         auto probs = DynamicSignClassifier::predict_proba(ml_feat);
                                         auto classes = DynamicSignClassifier::get_classes();
                                         double weight = (i == 10 || i == 15) ? 5.0 : 1.0;
-                                        for (size_t j = 0; j < classes.size() && j < probs.size(); ++j) {
-                                            shape_votes[classes[j]] += probs[j] * weight;
+                                        for (size_t k = 0; k < probs.size(); ++k) {
+                                            shape_votes[classes[k]] += probs[k] * weight;
                                         }
                                     }
                                 }
                             }
                             
+                            // --- NEW: CLUSTER PRUNING (Narrowing the search) ---
+                            std::vector<int> allowed_clusters;
+                            if (cluster_enabled) {
+                                 // --- CLUSTER PRUNING (Candidate Selection) ---
+                                 // We use frames 5 to N to avoid the "intro" movement noise.
+                                 std::vector<float> avg_feat(77, 0.0f);
+                                 int count = 0;
+                                 size_t start_f = (live_feat.size() > 10) ? 5 : 0; // Safety for short signs
+                                 for (size_t i = start_f; i < live_feat.size(); ++i) {
+                                     for (int k = 0; k < 77; ++k) avg_feat[k] += live_feat[i][k];
+                                     count++;
+                                 }
+                                 if (count > 0) {
+                                     for (int k = 0; k < 77; ++k) avg_feat[k] /= count;
+                                 }
+                                 
+                                 allowed_clusters = cluster_brain.getTopClusters(avg_feat, 3);
+                                 std::cout << "[PRUNING] Candidate Clusters: ";
+                                 for (int id : allowed_clusters) std::cout << id << " ";
+                                 std::cout << std::endl;
+                            }
+
                             // Find Top 10 ML Candidates for Fusion
                             std::vector<std::pair<std::string, double>> sorted_votes(shape_votes.begin(), shape_votes.end());
                             std::sort(sorted_votes.begin(), sorted_votes.end(), [](const auto& a, const auto& b) {
@@ -258,32 +329,54 @@ int main() {
                             if (total_votes < 0.1) total_votes = 1.0;
 
                             std::cout << "     [ML Confidence]: ";
-                            for (size_t i = 0; i < std::min((size_t)4, sorted_votes.size()); ++i) {
+                            for (size_t i = 0; i < std::min((size_t)8, sorted_votes.size()); ++i) {
                                 std::cout << sorted_votes[i].first << " (" << (int)((sorted_votes[i].second/total_votes)*100) << "%), ";
                             }
                             std::cout << std::endl;
 
-                            // Step 2: SEMANTIC SCORE FUSION
-                            // We combine DTW (Movement) and ML (Shape) into a single Fused Score.
-                            // Fused_Score = DTW_Dist * (1.0 - ML_Bonus)
-                            // This allows high ML confidence to "save" a sign even if movement is slightly off.
-                            struct FusionCandidate { std::string name; float fused_score; float dtw_dist; float ml_bonus; };
+                            // Step 2: TRI-FACTOR FUSION (ML + CLUSTER + DTW)
+                            struct FusionCandidate { std::string name; float fused_score; float dtw_dist; float ml_bonus; float cluster_bonus; };
                             std::vector<FusionCandidate> candidates;
 
-                            for (const auto& cat : movement_folders) {
-                                if (db.categorized_templates.count(cat)) {
-                                    for (auto const& [name, template_feat] : db.categorized_templates.at(cat)) {
-                                        float dtw_dist = DtwEngine::computeDualScore(live_feat, template_feat, 0.4f);
-                                        
-                                        // Calculate ML Bonus (Up to 80% discount for matching shape)
-                                        // This makes ML Shape recognition the primary driver.
-                                        float ml_bonus = 0.0f;
-                                        double vote_count = shape_votes.count(name) ? shape_votes.at(name) : 0.0;
-                                        ml_bonus = (float)(vote_count / total_votes) * 0.8f; 
-                                        
-                                        float fused = dtw_dist * (1.0f - ml_bonus);
-                                        candidates.push_back({name, fused, dtw_dist, ml_bonus});
-                                    }
+                            size_t top_n = std::min((size_t)5, sorted_votes.size()); // Top 5 only
+                            for (size_t i = 0; i < top_n; ++i) {
+                                std::string name = sorted_votes[i].first;
+                                double confidence = sorted_votes[i].second / total_votes;
+                                
+                                if (confidence < 0.001) continue;
+
+                                // 1. Calculate Cluster Proximity Bonus
+                                float cluster_bonus = 0.0f;
+                                if (cluster_enabled && !allowed_clusters.empty() && db.file_to_cluster.count(name)) {
+                                    int sign_cluster = db.file_to_cluster.at(name);
+                                    if (allowed_clusters.size() > 0 && sign_cluster == allowed_clusters[0]) cluster_bonus = 0.40f;
+                                    else if (allowed_clusters.size() > 1 && sign_cluster == allowed_clusters[1]) cluster_bonus = 0.20f;
+                                    else if (allowed_clusters.size() > 2 && sign_cluster == allowed_clusters[2]) cluster_bonus = 0.10f;
+                                }
+
+                                // 2. Calculate ML Confidence Bonus (Exponential)
+                                float ml_bonus = (float)std::sqrt(confidence) * 1.50f;
+
+                                // 3. Cap Total Bonus at 95%
+                                float total_bonus = std::min(0.95f, ml_bonus + cluster_bonus);
+
+                                float dtw_dist = 999.0f;
+                                bool found = false;
+
+                                if (db.categorized_templates.count("movement/single_hand") && db.categorized_templates.at("movement/single_hand").count(name)) {
+                                    auto template_feat = db.categorized_templates.at("movement/single_hand").at(name);
+                                    dtw_dist = DtwEngine::computeDualScore(live_feat, template_feat, 0.4f);
+                                    found = true;
+                                }
+                                else if (db.categorized_templates.count("movement/2_hands") && db.categorized_templates.at("movement/2_hands").count(name)) {
+                                    auto template_feat = db.categorized_templates.at("movement/2_hands").at(name);
+                                    dtw_dist = DtwEngine::computeDualScore(live_feat, template_feat, 0.4f);
+                                    found = true;
+                                }
+
+                                if (found) {
+                                    float fused = dtw_dist * (1.0f - total_bonus);
+                                    candidates.push_back({name, fused, dtw_dist, ml_bonus, cluster_bonus});
                                 }
                             }
                             
@@ -295,10 +388,14 @@ int main() {
                             if (!candidates.empty()) {
                                 winner = candidates[0].name;
                                 min_dist = candidates[0].dtw_dist;
-                                std::cout << "  >> [FUSION WINNER]: " << winner 
-                                          << " | Fused: " << candidates[0].fused_score 
-                                          << " (DTW: " << candidates[0].dtw_dist 
-                                          << ", ML Bonus: -" << (int)(candidates[0].ml_bonus * 100) << "%)" << std::endl;
+                                std::cout << "  >> [TOP 3 TRI-FACTOR FUSION]:" << std::endl;
+                                for(int i=0; i<std::min((int)3, (int)candidates.size()); ++i) {
+                                    std::cout << "     " << (i+1) << ". " << candidates[i].name 
+                                              << " | Fused: " << candidates[i].fused_score 
+                                              << " (DTW: " << candidates[i].dtw_dist 
+                                              << ", ML: -" << (int)(candidates[i].ml_bonus * 100) 
+                                              << "%, Cluster: -" << (int)(candidates[i].cluster_bonus * 100) << "%)" << std::endl;
+                                }
                             }
 
 

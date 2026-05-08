@@ -92,20 +92,26 @@ def extract_features(frame):
         for j in range(i+1, len(tips)):
             features.append(float(np.linalg.norm(pts[tips[i]] - pts[tips[j]]) / hand_size))
 
-    # 6. Thumb-Cross Matrix (8 features) - Solves A vs S (PIPs) and M/N/T (MCPs)
+    # 6. Thumb-Cross Matrix (4 features) - Solves A vs S (PIPs)
     cross_pips = [6, 10, 14, 18]
-    cross_mcps = [5, 9, 13, 17]
     for m in cross_pips:
-        features.append(float(np.linalg.norm(pts[4] - pts[m]) / hand_size))
-    for m in cross_mcps:
         features.append(float(np.linalg.norm(pts[4] - pts[m]) / hand_size))
 
     return features
 
 def main():
     print("=== Signs Sense: HYBRID TRAINER (77 Features 'Sniper Core+') ===")
-    static_dir = r"c:/Users/USER/Desktop/DTW/templates_backup/static/"
-    files = sorted(glob.glob(os.path.join(static_dir, "**/*.json"), recursive=True))
+    # --- Search both the main templates and the backup folders ---
+    static_dirs = [
+        r"c:/Users/USER/Desktop/DTW/templates/static/",
+        r"c:/Users/USER/Desktop/DTW/templates_backup/static/"
+    ]
+    
+    files = []
+    for s_dir in static_dirs:
+        if os.path.exists(s_dir):
+            files.extend(glob.glob(os.path.join(s_dir, "**/*.json"), recursive=True))
+    files = sorted(files)
     
     X, y = [], []
     for f in files:
@@ -120,7 +126,7 @@ def main():
                 print(f"Skipping corrupt or empty file: {f}")
 
     X, y = np.array(X), np.array(y)
-    clf = RandomForestClassifier(n_estimators=100, max_depth=20, random_state=42)
+    clf = RandomForestClassifier(n_estimators=80, max_depth=10, random_state=42)
     clf.fit(X, y)
     
     print(f"Training complete. Features: {len(X[0])}. Self-Accuracy: {accuracy_score(y, clf.predict(X)) * 100:.2f}%")

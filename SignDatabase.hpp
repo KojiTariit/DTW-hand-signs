@@ -16,9 +16,25 @@ public:
     // A map partitioned by CATEGORY (e.g., "movement", "static")
     // categorize_templates["static"]["A"] = ...
     std::map<std::string, std::map<std::string, std::vector<std::vector<float>>>> categorized_templates;
+    std::map<std::string, int> file_to_cluster;
 
     void loadFromDirectory(const std::string& rootPath) {
         categorized_templates.clear();
+        file_to_cluster.clear();
+
+        // --- NEW: Load Cluster Mapping ---
+        std::string mapPath = "model_output/file_cluster_mapping.json";
+        if (fs::exists(mapPath)) {
+            std::ifstream f(mapPath);
+            json mapData = json::parse(f);
+            for (auto const& [filename, clusterId] : mapData.items()) {
+                // Strip .json for matching
+                std::string stem = fs::path(filename).stem().string();
+                file_to_cluster[stem] = clusterId;
+            }
+            std::cout << "[DATABASE] Loaded cluster mapping for " << file_to_cluster.size() << " templates." << std::endl;
+        }
+
         std::cout << "--- Scanning Database: " << rootPath << " ---" << std::endl;
 
         if (!fs::exists(rootPath)) {
@@ -49,6 +65,7 @@ public:
         for (const auto& cat : categorized_templates) total_signs += cat.second.size();
         std::cout << "--- Scan Complete. Total Signs: " << total_signs << " ---" << std::endl;
     }
+
 
 private:
     std::vector<Frame> loadJsonFile(const std::string& path) {

@@ -95,12 +95,9 @@ def extract_features(frame):
         for j in range(i+1, len(tips)):
             features.append(float(np.linalg.norm(pts[tips[i]] - pts[tips[j]]) / hand_size))
 
-    # 6. Thumb-Cross Matrix (8 features) - Solves A vs S (PIPs) and M/N/T (MCPs)
+    # 6. Thumb-Cross Matrix (4 features) - Solves A vs S (PIPs)
     cross_pips = [6, 10, 14, 18]
-    cross_mcps = [5, 9, 13, 17]
     for m in cross_pips:
-        features.append(float(np.linalg.norm(pts[4] - pts[m]) / hand_size))
-    for m in cross_mcps:
         features.append(float(np.linalg.norm(pts[4] - pts[m]) / hand_size))
 
     return features
@@ -131,8 +128,8 @@ def main():
     
     print(f"Loaded {len(X)} frames from dynamic templates.")
     
-    # Train model
-    clf = RandomForestClassifier(n_estimators=100, max_depth=20, random_state=42)
+    # Train model (Reduced complexity to fit in C++ compiler memory)
+    clf = RandomForestClassifier(n_estimators=80, max_depth=10, random_state=42)
     clf.fit(X, y)
     
     acc = accuracy_score(y, clf.predict(X)) * 100
