@@ -100,6 +100,17 @@ def extract_features(frame):
     for m in cross_pips:
         features.append(float(np.linalg.norm(pts[4] - pts[m]) / hand_size))
 
+    # 7. Palm Orientation (3 features: Normal X, Y, Z)
+    v1 = pts[5] - pts[0]
+    v2 = pts[17] - pts[0]
+    normal = np.cross(v1, v2)
+    norm_mag = np.linalg.norm(normal)
+    if norm_mag > 1e-6:
+        normal /= norm_mag
+    else:
+        normal = np.array([0.0, 0.0, 0.0])
+    features.extend(normal.tolist())
+
     return features
 
 def main():

@@ -110,6 +110,15 @@ def extract_features(json_path):
         for i in range(4):
             features.append(magnitude(sub_points(lms[4], lms[cross_pips[i]])) / hand_size)
             
+        # 7. Palm Orientation (3 Features: Palm Normal X, Y, Z)
+        v1 = sub_points(lms[5], p0)
+        v2 = sub_points(lms[17], p0)
+        nx = v1['y']*v2['z'] - v1['z']*v2['y']
+        ny = v1['z']*v2['x'] - v1['x']*v2['z']
+        nz = v1['x']*v2['y'] - v1['y']*v2['x']
+        norm_mag = math.sqrt(nx**2 + ny**2 + nz**2) + 1e-6
+        features.extend([nx/norm_mag, ny/norm_mag, nz/norm_mag])
+
         frame_features.append(features)
     
     if not frame_features:
@@ -139,7 +148,7 @@ else:
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    n_groups = 9
+    n_groups = 10
     kmeans = KMeans(n_clusters=n_groups, n_init=10, random_state=42)
     labels = kmeans.fit_predict(X_scaled)
 

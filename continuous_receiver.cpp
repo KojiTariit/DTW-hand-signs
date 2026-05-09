@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <cmath>
+#include <fstream>
 #include "json.hpp"
 #include "SignDatabase.hpp"
 #include "DtwEngine.hpp"
@@ -200,6 +201,18 @@ int main() {
     sockaddr_in senderAddr;
     int senderAddrSize = sizeof(senderAddr);
     std::vector<Frame> current_sign_buffer;
+    std::string current_sentence = "";
+    std::string last_prediction = "";
+
+    // LATTICE: Stores a list of Top 3 candidates for every sign in the batch
+    struct WordCandidates { std::vector<std::string> options; };
+    std::vector<WordCandidates> sentence_lattice;
+
+    std::cout << "\n======================================================\n";
+    std::cout << "  CONTINUOUS LATTICE ENGINE ONLINE (V1.2)  \n";
+    std::cout << "  - Just sign continuously. \n";
+    std::cout << "  - Press 'F' to finish and see the full Lattice.\n";
+    std::cout << "======================================================\n\n";
 
     while (true) {
         int bytesReceived = recvfrom(recvSocket, buffer, sizeof(buffer) - 1, 0, (sockaddr*)&senderAddr, &senderAddrSize);
@@ -214,6 +227,7 @@ int main() {
                     std::cout << "\n[SIGN COMPLETE] Processing " << current_sign_buffer.size() << " frames." << std::endl;
                     
                     if (current_sign_buffer.size() >= 5) {
+                        WordCandidates wc;
                         // --- 3. ANALYZE MOVEMENT ---
                         size_t max_hands = 0;
                         float max_wrist_dist = 0.0f;
@@ -255,8 +269,8 @@ int main() {
 
                         // --- 4. SMART ROUTING TREE ---
                         std::string winner = "None";
-                        float TH_WRIST = 0.15f; 
-                        float TH_SHAPE = 0.06f; 
+                        float TH_WRIST = 0.05f; // Lowered from 0.15 for better 1-hand sensitivity
+                        float TH_SHAPE = 0.03f; // Lowered from 0.06
                         bool is_dynamic = (max_wrist_dist > TH_WRIST || max_shape_variance > TH_SHAPE || max_hands >= 2);
 
                         if (is_dynamic) {
@@ -271,9 +285,19 @@ int main() {
                                 if (count >= 2) two_hand_frames++;
                             }
                             
-                            std::string target_cat = (two_hand_frames >= 5) ? "movement/2_hands" : "movement/single_hand";
-                            std::cout << "  >> Filter: Searching [" << target_cat << "] folder only (2-hand frames: " << two_hand_frames << ")." << std::endl;
-                            std::vector<std::string> movement_folders = {target_cat};
+                            std::vector<std::string> movement_folders;
+                            if (two_hand_frames >= 15) {
+                                movement_folders = {"movement/2_hands"};
+                            } else if (two_hand_frames <= 2) {
+                                movement_folders = {"movement/single_hand"};
+                            } else {
+                                // Ambiguous case: Search both for safety
+                                movement_folders = {"movement/single_hand", "movement/2_hands"};
+                            }
+
+                            std::cout << "  >> Filter: Searching [";
+                            for(auto& m : movement_folders) std::cout << m << " ";
+                            std::cout << "] folders (2-hand frames: " << two_hand_frames << ")." << std::endl;
 
                             auto live_feat = DtwEngine::extractFeatures(current_sign_buffer);
 
@@ -300,15 +324,15 @@ int main() {
                             if (cluster_enabled) {
                                  // --- CLUSTER PRUNING (Candidate Selection) ---
                                  // We use frames 5 to N to avoid the "intro" movement noise.
-                                 std::vector<float> avg_feat(77, 0.0f);
+                                 std::vector<float> avg_feat(80, 0.0f);
                                  int count = 0;
                                  size_t start_f = (live_feat.size() > 10) ? 5 : 0; // Safety for short signs
                                  for (size_t i = start_f; i < live_feat.size(); ++i) {
-                                     for (int k = 0; k < 77; ++k) avg_feat[k] += live_feat[i][k];
+                                     for (int k = 0; k < 80; ++k) avg_feat[k] += live_feat[i][k];
                                      count++;
                                  }
                                  if (count > 0) {
-                                     for (int k = 0; k < 77; ++k) avg_feat[k] /= count;
+                                     for (int k = 0; k < 80; ++k) avg_feat[k] /= count;
                                  }
                                  
                                  allowed_clusters = cluster_brain.getTopClusters(avg_feat, 3);
@@ -396,6 +420,14 @@ int main() {
                                               << ", ML: -" << (int)(candidates[i].ml_bonus * 100) 
                                               << "%, Cluster: -" << (int)(candidates[i].cluster_bonus * 100) << "%)" << std::endl;
                                 }
+
+                                // Add Top 3 to the Lattice (Dynamic Route)
+                                for(int i=0; i<std::min((int)3, (int)candidates.size()); ++i) {
+                                    wc.options.push_back(candidates[i].name);
+                                }
+                                if (!wc.options.empty()) {
+                                    sentence_lattice.push_back(wc);
+                                }
                             }
 
 
@@ -406,13 +438,54 @@ int main() {
                             if (!mid_f.hands.empty()) {
                                 std::vector<float> ml_features = extract_ml_features(mid_f);
                                 winner = StaticSignClassifier::predict(ml_features);
+                                
+                                // Add single winner to Lattice (Static Route)
+                                if (winner != "NONE" && winner != "") {
+                                    wc.options.push_back(winner);
+                                    sentence_lattice.push_back(wc);
+                                }
                             }
                         }
                         
-                        std::cout << ">>> PREDICTION: [ " << winner << " ] <<<" << std::endl;
+                        // Lattice is now handled inside each route above
+
+                        if (winner != "" && winner != last_prediction) {
+                            if (!current_sentence.empty()) current_sentence += " ";
+                            current_sentence += winner;
+                            last_prediction = winner;
+                        }
+
+                        std::cout << ">>> ADDED TO BATCH: [ " << winner << " ] (Candidates: ";
+                        for(auto& opt : wc.options) std::cout << opt << " ";
+                        std::cout << ")" << std::endl;
                     }
                     current_sign_buffer.clear();
                 } 
+                else if (data.contains("type") && data["type"] == "FINISH_BATCH") {
+                    std::cout << "\n[BRIDGE] Saving lattice and triggering AI..." << std::endl;
+                    
+                    std::ofstream outFile("bridge_lattice.txt");
+                    if (outFile.is_open()) {
+                        for (size_t i = 0; i < sentence_lattice.size(); ++i) {
+                            outFile << "Word " << (i+1) << ": { ";
+                            for (size_t j = 0; j < sentence_lattice[i].options.size(); ++j) {
+                                outFile << sentence_lattice[i].options[j] << (j == sentence_lattice[i].options.size()-1 ? "" : ", ");
+                            }
+                            outFile << " }" << std::endl;
+                        }
+                        outFile.close();
+                        
+                        // TRIGGER THE PYTHON BRIDGE
+                        std::cout << "[BRIDGE] Calling Python AI Polisher..." << std::endl;
+                        system("python ai_polisher.py --auto");
+                    } else {
+                        std::cerr << "[ERROR] Could not write to bridge_lattice.txt" << std::endl;
+                    }
+                    
+                    sentence_lattice.clear();
+                    current_sentence = "";
+                    last_prediction = "";
+                }
                 else if (data.contains("type") && data["type"] == "FRAME") {
                     // --- 5. PARSE LIVE DATA ---
                     Frame frame;
@@ -475,6 +548,30 @@ int main() {
             } catch (const std::exception& e) {
                 std::cerr << "\n[JSON ERROR] " << e.what() << std::endl;
             }
+        }
+
+        // --- KEYBOARD HANDLING (Non-Blocking) ---
+        if (GetAsyncKeyState('F') & 0x8000) {
+            std::cout << "\n\n======================================================\n";
+            std::cout << "         --- BATCH FINISHED: FINAL LATTICE ---         \n";
+            std::cout << "======================================================\n";
+            
+            for (size_t i = 0; i < sentence_lattice.size(); ++i) {
+                std::cout << "Word " << (i+1) << ": { ";
+                for (size_t j = 0; j < sentence_lattice[i].options.size(); ++j) {
+                    std::cout << sentence_lattice[i].options[j] << (j == sentence_lattice[i].options.size()-1 ? "" : ", ");
+                }
+                std::cout << " }" << std::endl;
+            }
+            
+            std::cout << "\n[AI PROMPT READY]: Copy the list above to Gemini/ChatGPT \n";
+            std::cout << "to reconstruct the perfect sentence.\n";
+            std::cout << "======================================================\n\n";
+            
+            sentence_lattice.clear();
+            current_sentence = "";
+            last_prediction = "";
+            Sleep(1000); // Debounce
         }
     }
     return 0;

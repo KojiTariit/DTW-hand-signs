@@ -127,6 +127,23 @@ public:
                 feat.push_back(std::sqrt(dx*dx+dy*dy+dz*dz) / hand_size);
             }
 
+            // 7. Palm Orientation (3 Features: Palm Normal X, Y, Z)
+            Point3D v1_n = {lms[5].x - lms[0].x, lms[5].y - lms[0].y, lms[5].z - lms[0].z};
+            Point3D v2_n = {lms[17].x - lms[0].x, lms[17].y - lms[0].y, lms[17].z - lms[0].z};
+            Point3D normal = {
+                v1_n.y*v2_n.z - v1_n.z*v2_n.y,
+                v1_n.z*v2_n.x - v1_n.x*v2_n.z,
+                v1_n.x*v2_n.y - v1_n.y*v2_n.x
+            };
+            float norm_mag = std::sqrt(normal.x*normal.x + normal.y*normal.y + normal.z*normal.z);
+            if (norm_mag > 1e-6f) {
+                feat.push_back(normal.x / norm_mag);
+                feat.push_back(normal.y / norm_mag);
+                feat.push_back(normal.z / norm_mag);
+            } else {
+                feat.push_back(0.0f); feat.push_back(0.0f); feat.push_back(0.0f);
+            }
+
             features.push_back(feat);
         }
         return features;
@@ -138,18 +155,20 @@ public:
         for (size_t i = 0; i < f1.size(); ++i) {
             float diff = f1[i] - f2[i];
             
-            // --- HANDSHAPE WEIGHTING (Sniper Core) ---
-            // Indices 0-39 are fingers, extension, and angles. 
-            // We give them a 2.0x boost so they aren't ignored.
+            // --- HANDSHAPE WEIGHTING ---
             if (i >= 0 && i < 40) {
                 diff *= 2.0f;
             }
 
             // --- SPATIAL STAR WEIGHTING ---
-            // Indices 40-62 are the Face Context Probes (dist to Chin, Forehead, etc.)
-            // We multiply the difference by 4.0 to make spatial destination the dominant factor
             if (i >= 40 && i <= 62) {
                 diff *= 4.0f; 
+            }
+
+            // --- PALM ORIENTATION WEIGHTING (NEW) ---
+            // Indices 77, 78, 79
+            if (i >= 77 && i <= 79) {
+                diff *= 3.0f; 
             }
             
             sum += diff * diff;
@@ -169,7 +188,8 @@ public:
             std::vector<float> d;
             size_t dim = std::min(seq[i].size(), seq[i-1].size());
             for (size_t k = 0; k < dim; ++k) {
-                float val = (seq[i][k] - seq[i-1][k]) * 5.0f; // Velocity scaled to balance shape
+                // RHYTHM BOOST: 8.0x scaling to emphasize movement velocity
+                float val = (seq[i][k] - seq[i-1][k]) * 8.0f; 
                 d.push_back(val);
             }
             derivatives.push_back(d);
@@ -221,8 +241,13 @@ public:
         auto deriv2 = computeDerivatives(seq2);
         float rhythm_score = computeDTW(deriv1, deriv2);
 
+        // Score C: Duration Penalty
+        float n = (float)seq1.size();
+        float m = (float)seq2.size();
+        float duration_penalty = std::abs(n - m) / std::max(n, m) * 1.5f;
+
         // Weighted fusion
-        float final_score = (alpha * shape_score) + ((1.0f - alpha) * rhythm_score);
+        float final_score = (alpha * shape_score) + ((1.0f - alpha) * rhythm_score) + duration_penalty;
         return final_score;
     }
 };
