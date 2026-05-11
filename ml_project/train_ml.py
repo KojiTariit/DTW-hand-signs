@@ -28,9 +28,10 @@ def extract_features(frame):
 
     features = []
 
-    # 1. Wrist-Relative Distances (20 features)
+    # 1. Wrist-Relative XYZ Coordinates (60 features) - Solves Orientation (H vs R)
     for i in range(1, 21):
-        features.append(float(np.linalg.norm(pts[i] - p0) / hand_size))
+        diff = pts[i] - p0
+        features.extend((diff / hand_size).tolist())
 
     # 2. Finger Extension Ratios (5) - Curl Detection
     tips = [4, 8, 12, 16, 20]
@@ -96,17 +97,16 @@ def extract_features(frame):
     cross_pips = [6, 10, 14, 18]
     for m in cross_pips:
         features.append(float(np.linalg.norm(pts[4] - pts[m]) / hand_size))
-
-    # 7. Palm Orientation (3 features: Normal X, Y, Z)
+    # 7. Palm Orientation (3 features) - Solves Palm Up/Down
     v1 = pts[5] - pts[0]
     v2 = pts[17] - pts[0]
     normal = np.cross(v1, v2)
     norm_mag = np.linalg.norm(normal)
     if norm_mag > 1e-6:
         normal /= norm_mag
+        features.extend(normal.tolist())
     else:
-        normal = np.array([0.0, 0.0, 0.0])
-    features.extend(normal.tolist())
+        features.extend([0.0, 0.0, 0.0])
 
     return features
 

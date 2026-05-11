@@ -23,10 +23,13 @@ def main():
     cap.set(cv2.CAP_PROP_FPS, 60)
     
     recording = False
+    current_sign_buffer = []
     prev_right_wrist, prev_left_wrist = None, None
-    silence_frames = 0
-    movement_threshold = 0.04 # Increased from 0.02 to ignore transition drift
-    max_silence = 45 # Increased from 30 (~1.5 seconds) to be more patient
+    silence_start_time = None
+    last_sign_time = 0
+    movement_threshold = 0.04 
+    freeze_duration = 0.7 
+    sign_break = 0.4
     
     print("--- LIVE SKELETAL CAPTURE (Gen-2.5) ---")
     print("Capturing 10-point Spatial Star + Hands")
@@ -79,23 +82,30 @@ def main():
             is_moving = True
             
         if is_moving:
-            if not recording:
+            if not recording and (time.time() - last_sign_time > sign_break):
                 recording = True
                 print("Movement detected! Started capturing...")
-            silence_frames = 0
+            silence_start_time = None
+            current_sign_buffer.append(1)
         elif hand_in_frame:
             # Hand is present but NOT moving significantly (The "Freeze")
             if recording:
-                silence_frames += 1
-                if silence_frames > max_silence:
+                if silence_start_time is None:
+                    silence_start_time = time.time()
+                
+                current_sign_buffer.append(1)
+                
+                elapsed_silence = time.time() - silence_start_time
+                if elapsed_silence > freeze_duration:
                     recording = False
-                    # Only send if the sign is long enough to be real (e.g. > 10 frames)
                     if len(current_sign_buffer) > 10:
                         print(f"Freeze detected! Sign length: {len(current_sign_buffer)} frames. Classifying...")
                         sock.sendto(json.dumps({"type": "END_OF_SIGN"}).encode('utf-8'), server_address)
+                        last_sign_time = time.time()
                     else:
                         print(f"Ignored short movement ({len(current_sign_buffer)} frames).")
                     current_sign_buffer = []
+                    silence_start_time = None
         else:
             # No hands in frame at all
             if recording:
@@ -103,16 +113,20 @@ def main():
                 if len(current_sign_buffer) > 10:
                     print(f"Hand left scene! Sign length: {len(current_sign_buffer)} frames. Classifying...")
                     sock.sendto(json.dumps({"type": "END_OF_SIGN"}).encode('utf-8'), server_address)
+                    last_sign_time = time.time()
                 else:
                     print(f"Ignored short movement ({len(current_sign_buffer)} frames).")
                 current_sign_buffer = []
-            silence_frames = 0
+            silence_start_time = None
             prev_right_wrist = None
             prev_left_wrist = None
 
-        status_text = "Status: WAITING... (Move hands to start)"
+        status_text = "Status: WAITING..."
         if recording:
-            status_text = f"Status: SIGNING! (Silence: {silence_frames}/{max_silence})"
+            elapsed = time.time() - (silence_start_time if silence_start_time else time.time())
+            status_text = f"Status: SIGNING! (Silence: {elapsed:.1f}s)"
+        elif time.time() - last_sign_time < sign_break:
+            status_text = "Status: BREAK..."
 
         # --- 3. DRAWING LOGIC ---
         if results.pose_landmarks:

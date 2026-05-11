@@ -58,12 +58,11 @@ public:
 
             std::vector<float> feat;
             
-            // 1. Wrist-Relative Distances (20)
+            // 1. Wrist-Relative XYZ Coordinates (60) - Solves Orientation (H vs R)
             for (int i = 1; i < 21; ++i) {
-                float dx = lms[i].x - lms[0].x;
-                float dy = lms[i].y - lms[0].y;
-                float dz = lms[i].z - lms[0].z;
-                feat.push_back(std::sqrt(dx*dx + dy*dy + dz*dz) / hand_size);
+                feat.push_back((lms[i].x - lms[0].x) / hand_size);
+                feat.push_back((lms[i].y - lms[0].y) / hand_size);
+                feat.push_back((lms[i].z - lms[0].z) / hand_size);
             }
 
             // 2. Finger Extension Ratios (5)
@@ -156,12 +155,12 @@ public:
             float diff = f1[i] - f2[i];
             
             // --- HANDSHAPE WEIGHTING ---
-            if (i >= 0 && i < 40) {
+            if (i >= 0 && i < 80) { // XYZ (60) + Curl (5) + Angles (15)
                 diff *= 2.0f;
             }
 
             // --- SPATIAL STAR WEIGHTING ---
-            if (i >= 40 && i <= 62) {
+            if (i >= 80 && i <= 103) { // Face (23)
                 diff *= 4.0f; 
             }
 

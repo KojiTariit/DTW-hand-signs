@@ -6,7 +6,7 @@ from mediapipe.python.solutions import drawing_utils as mp_drawing
 # We use explicit path to bypass potential 'AttributeError' in some Windows builds
 hand = mp_hand.Hands(
     static_image_mode=False,         # ตั้งค่าเป็น False เพราะเราทำ Real-time (ถ้าเป็นภาพนิ่งให้ตั้งเป็น True)
-    max_num_hands=2,                # ตรวจจับมือได้สูงสุด 2 มือในคราวเดียว
+    max_num_hands=1,                # ตรวจจับมือได้สูงสุด 2 มือในคราวเดียว
     min_detection_confidence=0.5,    # ค่าความมั่นใจขั้นต่ำในการตรวจพบมือครั้งแรก (50%)
     min_tracking_confidence=0.5     # ค่าความมั่นใจขั้นต่ำในการติดตามมือในเฟรมถัดไป (50%)
 )

@@ -22,6 +22,10 @@ def main():
     # Attempting to boost FPS. 
     cap.set(cv2.CAP_PROP_FPS, 60)
     
+    # --- EXPERIMENTAL SLIDER ---
+    cv2.namedWindow('Scrap Capture')
+    cv2.createTrackbar('ML Power', 'Scrap Capture', 75, 100, lambda x: None)
+    
     recording = False
     
     print("--- LIVE SKELETAL CAPTURE (Gen-2.5) ---")
@@ -35,8 +39,11 @@ def main():
 
         # --- 2. PERFORMANCE OPTIMIZATION ---
         # 320x240 is mandatory for Complexity 1 on laptops.
-        image = cv2.resize(image, (320, 240))
+        #image = cv2.resize(image, (320, 240))
         image = cv2.flip(image, 1)
+        # Read the experimental slider
+        ml_power = cv2.getTrackbarPos('ML Power', 'Scrap Capture') / 100.0
+        
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
         # RUN SKELETAL AI
@@ -137,6 +144,7 @@ def main():
             sock.sendto(json.dumps(payload).encode('utf-8'), server_address)
 
         cv2.putText(image, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255) if recording else (0, 255, 0), 2)
+        cv2.putText(image, f"Power: {ml_power:.2f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
         cv2.imshow('Skeletal Capture Gen-2.5', image)
 
         key = cv2.waitKey(1) & 0xFF

@@ -1,57 +1,57 @@
 === SIGNS SENSE: CLUSTER MAP ===
-Total Signs: 208 | Clusters: 10
+Total Signs: 268 | Clusters: 10
 
-CLUSTER 0 (20 members):
+CLUSTER 0 (30 members):
   - Help3.json
-  - Help4.json
   - Like (1).json
   - Like1.json
   - Like2.json
   - Like3.json
   - Like4.json
   - Student3.json
-  - Study3.json
-  - Study4.json
-  - TalkingTooMuch_3.json
   - Want.json
   - Want1.json
   - Want2.json
   - Want3.json
-  - Want4.json
   - bad_2.json
   - bad_4.json
   - good.json
+  - happy.json
+  - happy_2.json
+  - happy_3.json
+  - happy_4.json
+  - happy_5.json
   - hungry.json
+  - please.json
+  - please_2.json
+  - please_3.json
+  - please_4.json
+  - please_5.json
+  - tired.json
+  - tired_2.json
+  - tired_3.json
+  - tired_4.json
+  - tired_5.json
 
-CLUSTER 1 (15 members):
-  - Eavesdropping_ear.json
-  - Eavesdropping_eyes.json
-  - Listen.json
-  - Listen_2.json
-  - Listen_with_eyes.json
-  - name.json
-  - name_2.json
-  - name_3.json
-  - name_4.json
-  - name_5.json
-  - weight.json
-  - weight_2.json
-  - weight_3.json
-  - weight_4.json
-  - weight_5.json
-
-CLUSTER 2 (31 members):
+CLUSTER 1 (45 members):
+  - Drink3.json
+  - Drink4.json
+  - Eat1.json
+  - Eat2.json
+  - Eat3.json
+  - Eat4.json
   - Forgot.json
   - Forgot1.json
   - J.json
   - More_thinking.json
-  - N.json
   - Student (1).json
   - Student1.json
   - Student2.json
+  - Student4.json
+  - Study.json
+  - TalkingToomuch_5.json
   - Think.json
   - Thinking.json
-  - Write.json
   - forgot_2.json
   - forgot_3.json
   - forgot_4.json
@@ -60,35 +60,34 @@ CLUSTER 2 (31 members):
   - more_thinking_3.json
   - more_thinking_4.json
   - more_thinking_5.json
-  - think_2.json
-  - think_3.json
+  - study_2.json
+  - study_3.json
+  - study_4.json
+  - study_5.json
   - think_4.json
   - think_5.json
   - thinking_2.json
   - thinking_3.json
   - thinking_4.json
   - thinking_5.json
+  - walk.json
+  - walk_2.json
+  - walk_3.json
+  - walk_4.json
+  - walk_5.json
   - write_2.json
-  - write_3.json
   - write_4.json
   - write_5.json
+  - yes_5.json
 
-CLUSTER 3 (41 members):
-  - Drink.json
+CLUSTER 2 (36 members):
   - Drink1.json
   - Drink2.json
-  - Drink3.json
-  - Drink4.json
-  - Eat1.json
-  - Eat2.json
-  - Eat3.json
-  - Eat4.json
   - Sleep.json
-  - Student4.json
   - Talk.json
   - TalkingTooMuch_2.json
+  - TalkingTooMuch_3.json
   - TalkingToomuch_4.json
-  - TalkingToomuch_5.json
   - TalkingtooMuch.json
   - bad.json
   - bad_3.json
@@ -96,7 +95,6 @@ CLUSTER 3 (41 members):
   - good_2.json
   - good_3.json
   - good_5.json
-  - mom.json
   - mom_2.json
   - mom_3.json
   - mom_4.json
@@ -110,13 +108,65 @@ CLUSTER 3 (41 members):
   - sleep_3.json
   - sleep_4.json
   - sleep_5.json
-  - walk.json
-  - walk_2.json
-  - walk_3.json
-  - walk_4.json
-  - walk_5.json
+  - stop_2.json
+  - stop_3.json
+  - stop_4.json
+  - stop_5.json
+  - thankyou.json
+  - thankyou_2.json
+  - thankyou_3.json
+  - thankyou_4.json
+  - thankyou_5.json
 
-CLUSTER 4 (17 members):
+CLUSTER 3 (44 members):
+  - Grandma3_Tonkla.json
+  - Grandma4_Tonkla.json
+  - Grandpa1_Tonkla.json
+  - Grandpa2_Tonkla.json
+  - Grandpa3_Tonkla.json
+  - Grandpa4_Tonkla.json
+  - Grandpa_Tonkla.json
+  - Help4.json
+  - Study3.json
+  - Study4.json
+  - Teacher.json
+  - Teacher1.json
+  - Teacher2.json
+  - Teacher3.json
+  - Teacher4.json
+  - byebye.json
+  - byebye_2.json
+  - byebye_3.json
+  - byebye_4.json
+  - byebye_5.json
+  - dad.json
+  - dad_2.json
+  - dad_3.json
+  - dad_4.json
+  - dad_5.json
+  - grandma.json
+  - grandma_2.json
+  - grandma_3.json
+  - grandma_4.json
+  - grandma_5.json
+  - grandpa.json
+  - grandpa_2.json
+  - grandpa_3.json
+  - grandpa_4.json
+  - grandpa_5.json
+  - hello.json
+  - hello_3.json
+  - hello_5.json
+  - no.json
+  - no_2.json
+  - no_3.json
+  - no_4.json
+  - no_5.json
+  - stop.json
+
+CLUSTER 4 (22 members):
+  - Friend1.json
+  - Friend3.json
   - Friend4.json
   - Go3.json
   - Go4.json
@@ -124,7 +174,6 @@ CLUSTER 4 (17 members):
   - Need2.json
   - Need3.json
   - Need4.json
-  - Study.json
   - Study1.json
   - Study2.json
   - We.json
@@ -133,9 +182,13 @@ CLUSTER 4 (17 members):
   - You2.json
   - You3.json
   - You4.json
+  - Z.json
   - need1.json
+  - think_2.json
+  - think_3.json
+  - yes_4.json
 
-CLUSTER 5 (16 members):
+CLUSTER 5 (17 members):
   - Dad1_Tonkla.json
   - Dad2_Tonkla.json
   - Dad3_Tonkla.json
@@ -152,48 +205,54 @@ CLUSTER 5 (16 members):
   - Mom3_Tonkla.json
   - Mom4_Tonkla.json
   - Mom_Tonkla.json
+  - hello_4.json
 
-CLUSTER 6 (27 members):
-  - Grandma3_Tonkla.json
-  - Grandma4_Tonkla.json
-  - Grandpa1_Tonkla.json
-  - Grandpa2_Tonkla.json
-  - Grandpa3_Tonkla.json
-  - Grandpa4_Tonkla.json
-  - Grandpa_Tonkla.json
-  - Teacher.json
-  - Teacher1.json
-  - Teacher2.json
-  - Teacher3.json
-  - Teacher4.json
-  - dad.json
-  - dad_2.json
-  - dad_3.json
-  - dad_4.json
-  - dad_5.json
-  - grandma.json
-  - grandma_2.json
-  - grandma_3.json
-  - grandma_4.json
-  - grandma_5.json
-  - grandpa.json
-  - grandpa_2.json
-  - grandpa_3.json
-  - grandpa_4.json
-  - grandpa_5.json
+CLUSTER 6 (15 members):
+  - Eavesdropping_ear.json
+  - Eavesdropping_eyes.json
+  - Listen.json
+  - Listen_2.json
+  - Listen_with_eyes.json
+  - name.json
+  - name_2.json
+  - name_3.json
+  - name_4.json
+  - name_5.json
+  - weight.json
+  - weight_2.json
+  - weight_3.json
+  - weight_4.json
+  - weight_5.json
 
-CLUSTER 7 (19 members):
+CLUSTER 7 (12 members):
+  - Help.json
+  - Help1.json
+  - Help2.json
+  - help_2.json
+  - help_3.json
+  - help_4.json
+  - help_5.json
+  - work.json
+  - work_2.json
+  - work_3.json
+  - work_4.json
+  - work_5.json
+
+CLUSTER 8 (22 members):
   - Come.json
   - Come1.json
   - Come2.json
   - Come3.json
   - Come4.json
+  - Friend.json
+  - Friend2.json
   - Go (1).json
   - Go1.json
   - Go2.json
   - Run.json
   - Say.json
   - Someone_walking.json
+  - Want4.json
   - run_2.json
   - run_3.json
   - run_4.json
@@ -203,29 +262,30 @@ CLUSTER 7 (19 members):
   - say_4.json
   - say_5.json
 
-CLUSTER 8 (15 members):
-  - Friend.json
-  - Friend1.json
-  - Friend2.json
-  - Friend3.json
+CLUSTER 9 (25 members):
   - Me.json
   - Me1.json
   - Me2.json
   - Me3.json
   - Me4.json
+  - N.json
   - We1.json
   - We2.json
   - We3.json
   - We4.json
-  - Work4.json
-  - Z.json
-
-CLUSTER 9 (7 members):
-  - Help.json
-  - Help1.json
-  - Help2.json
   - Work (1).json
   - Work1.json
   - Work2.json
   - Work3.json
+  - Work4.json
+  - Write.json
+  - sorry.json
+  - sorry_2.json
+  - sorry_3.json
+  - sorry_4.json
+  - sorry_5.json
+  - write_3.json
+  - yes.json
+  - yes_2.json
+  - yes_3.json
 

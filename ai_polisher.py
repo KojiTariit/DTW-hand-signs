@@ -5,7 +5,7 @@ import json
 import requests
 
 # PASTE YOUR API KEY HERE:
-GEMINI_API_KEY = ""
+GEMINI_API_KEY = "AIzaSyDO9O-Hz4CgBmq7YSwyt0TjGXKtsJd_Cdk"
 
 def polish_with_ai(lattice_data):
     # --- DEBUG: SHOW THE BRACKETS ---
