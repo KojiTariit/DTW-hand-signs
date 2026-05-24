@@ -47,26 +47,4 @@ export function initUI() {
             }
         });
     }
-
-    // Modal Logic
-    const modalBg = document.getElementById('modal-language-bg');
-    const modalContent = document.getElementById('modal-language-content');
-    const modalWrap = document.getElementById('modal-language');
-    
-    const openModal = () => {
-        modalWrap.classList.remove('pointer-events-none');
-        modalBg.classList.replace('opacity-0', 'opacity-100');
-        modalContent.classList.replace('translate-y-full', 'translate-y-0');
-    };
-    
-    const closeModal = () => {
-        modalBg.classList.replace('opacity-100', 'opacity-0');
-        modalContent.classList.replace('translate-y-0', 'translate-y-full');
-        setTimeout(() => modalWrap.classList.add('pointer-events-none'), 300);
-    };
-
-    document.getElementById('btn-lang-source').addEventListener('click', openModal);
-    document.getElementById('btn-lang-target').addEventListener('click', openModal);
-    document.getElementById('btn-close-lang').addEventListener('click', closeModal);
-    modalBg.addEventListener('click', closeModal);
 }

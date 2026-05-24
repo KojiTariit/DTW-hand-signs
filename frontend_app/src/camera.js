@@ -19,6 +19,14 @@ export class CameraEngine {
         this.sentenceWords = [];
         this.wordCandidates = []; // Top-3 candidates per recognized word, for history
         this.history = JSON.parse(localStorage.getItem('signHistory') || '[]');
+
+        this.selectedSourceLang = localStorage.getItem('selectedSourceLang') || 'ASL';
+        this.selectedTargetLang = localStorage.getItem('selectedTargetLang') || 'English';
+        this.signLanguages = ['ASL', 'TSL', 'CSL', 'BSL'];
+        this.spokenLanguages = ['English', 'Thai', 'Chinese', 'Spanish', 'Japanese'];
+        this.currentModalTab = 'sign';
+        this.modalContext = 'source';
+        this.tempSelectedLang = '';
         
         this.btnClear = document.getElementById('btn-clear');
         this.btnCopy = document.getElementById('btn-copy');
@@ -77,6 +85,12 @@ export class CameraEngine {
 
     async initialize() {
         this.translationText.innerText = "Loading AI Models...";
+        
+        // Update language button text on load
+        const btnSource = document.getElementById('btn-lang-source');
+        const btnTarget = document.getElementById('btn-lang-target');
+        if (btnSource) btnSource.innerText = this.selectedSourceLang;
+        if (btnTarget) btnTarget.innerText = this.selectedTargetLang;
         
         try {
             // Load Models
@@ -333,6 +347,9 @@ export class CameraEngine {
 
         // Render history on load
         this.renderHistory();
+
+        // Initialize language selection modal logic
+        this.initLanguageModal();
 
         this.camera.start();
         
@@ -1050,8 +1067,14 @@ export class CameraEngine {
         try {
             // Check all models to select the best active one (uses cache if available)
             const targetModel = await this.getActiveGeminiModel(apiKey);
+            const targetLang = this.selectedTargetLang || 'English';
             
-            const prompt = `You are a sign language interpreter. These words were recognized from sign language gestures in order: "${words.join(', ')}". Construct the most natural, grammatically correct English sentence from these words. Output only the final sentence, nothing else.`;
+            let prompt = "";
+            if (targetLang === 'English') {
+                prompt = `You are a sign language interpreter. These words were recognized from sign language gestures in order: "${words.join(', ')}". Construct the most natural, grammatically correct English sentence from these words. Output only the final sentence, nothing else.`;
+            } else {
+                prompt = `You are a sign language interpreter. These words were recognized from sign language gestures in order: "${words.join(', ')}". First, construct the most natural grammatically correct English sentence from these words. Second, translate that polished English sentence into the target spoken language "${targetLang}". Output only the final translated "${targetLang}" sentence, nothing else.`;
+            }
 
             const res = await fetch(
                 `https://generativelanguage.googleapis.com/v1/${targetModel}:generateContent?key=${apiKey}`,
@@ -1253,5 +1276,185 @@ export class CameraEngine {
         `;
 
         panel.classList.remove('translate-y-full');
+    }
+
+    initLanguageModal() {
+        const btnSource = document.getElementById('btn-lang-source');
+        const btnTarget = document.getElementById('btn-lang-target');
+        const modalBg = document.getElementById('modal-language-bg');
+        const btnClose = document.getElementById('btn-close-lang');
+        const tabSign = document.getElementById('tab-sign-lang');
+        const tabSpoken = document.getElementById('tab-spoken-lang');
+        const btnConfirm = document.getElementById('btn-confirm-lang');
+        const searchInput = document.getElementById('lang-search');
+
+        if (btnSource) {
+            btnSource.addEventListener('click', () => {
+                this.openLanguageModal('source');
+            });
+        }
+
+        if (btnTarget) {
+            btnTarget.addEventListener('click', () => {
+                this.openLanguageModal('target');
+            });
+        }
+
+        if (modalBg) {
+            modalBg.addEventListener('click', () => this.closeLanguageModal());
+        }
+
+        if (btnClose) {
+            btnClose.addEventListener('click', () => this.closeLanguageModal());
+        }
+
+        if (tabSign) {
+            tabSign.addEventListener('click', () => this.switchModalTab('sign'));
+        }
+
+        if (tabSpoken) {
+            tabSpoken.addEventListener('click', () => this.switchModalTab('spoken'));
+        }
+
+        if (btnConfirm) {
+            btnConfirm.addEventListener('click', () => this.confirmLanguageSelection());
+        }
+
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                this.renderModalLangList(e.target.value);
+            });
+        }
+    }
+
+    openLanguageModal(context) {
+        this.modalContext = context;
+        this.currentModalTab = context === 'source' ? 'sign' : 'spoken';
+        this.tempSelectedLang = context === 'source' ? this.selectedSourceLang : this.selectedTargetLang;
+
+        const modalWrap = document.getElementById('modal-language');
+        const modalBg = document.getElementById('modal-language-bg');
+        const modalContent = document.getElementById('modal-language-content');
+        const searchInput = document.getElementById('lang-search');
+
+        if (searchInput) searchInput.value = '';
+
+        this.switchModalTab(this.currentModalTab);
+
+        if (modalWrap && modalBg && modalContent) {
+            modalWrap.classList.remove('pointer-events-none');
+            modalBg.classList.replace('opacity-0', 'opacity-100');
+            modalContent.classList.replace('translate-y-full', 'translate-y-0');
+        }
+    }
+
+    closeLanguageModal() {
+        const modalWrap = document.getElementById('modal-language');
+        const modalBg = document.getElementById('modal-language-bg');
+        const modalContent = document.getElementById('modal-language-content');
+
+        if (modalWrap && modalBg && modalContent) {
+            modalBg.classList.replace('opacity-100', 'opacity-0');
+            modalContent.classList.replace('translate-y-0', 'translate-y-full');
+            setTimeout(() => modalWrap.classList.add('pointer-events-none'), 300);
+        }
+    }
+
+    switchModalTab(tabType) {
+        const tabSign = document.getElementById('tab-sign-lang');
+        const tabSpoken = document.getElementById('tab-spoken-lang');
+        const listContainer = document.getElementById('modal-lang-list');
+        const searchInput = document.getElementById('lang-search');
+
+        const query = searchInput ? searchInput.value : '';
+
+        if (tabType === 'sign') {
+            if (tabSign) {
+                tabSign.className = "flex-1 py-2 text-sm font-semibold text-brand-blue border-b-2 border-brand-blue transition-all duration-300";
+            }
+            if (tabSpoken) {
+                tabSpoken.className = "flex-1 py-2 text-sm font-semibold text-slate-400 transition-all duration-300";
+            }
+        } else {
+            if (tabSign) {
+                tabSign.className = "flex-1 py-2 text-sm font-semibold text-slate-400 transition-all duration-300";
+            }
+            if (tabSpoken) {
+                tabSpoken.className = "flex-1 py-2 text-sm font-semibold text-brand-blue border-b-2 border-brand-blue transition-all duration-300";
+            }
+        }
+
+        this.currentModalTab = tabType;
+
+        // Beautiful fade-out/fade-in animation for list content
+        if (listContainer) {
+            listContainer.classList.add('opacity-0');
+            setTimeout(() => {
+                this.renderModalLangList(query);
+                listContainer.classList.remove('opacity-0');
+            }, 150);
+        }
+    }
+
+    renderModalLangList(searchQuery = '') {
+        const listContainer = document.getElementById('modal-lang-list');
+        if (!listContainer) return;
+
+        const langs = this.currentModalTab === 'sign' ? this.signLanguages : this.spokenLanguages;
+        
+        listContainer.innerHTML = '';
+        const query = searchQuery.toLowerCase().trim();
+
+        langs.forEach(lang => {
+            if (query && !lang.toLowerCase().includes(query)) return;
+
+            const isSelected = lang === this.tempSelectedLang;
+            const optionDiv = document.createElement('div');
+            optionDiv.className = `lang-option flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition-all duration-150`;
+
+            optionDiv.innerHTML = `
+                <span class="text-sm font-medium ${isSelected ? 'text-brand-blue font-semibold dark:text-sky-400' : 'text-slate-800 dark:text-slate-200'}">${lang}</span>
+                ${isSelected 
+                    ? '<i class="ph-fill ph-check-circle text-brand-blue dark:text-sky-400 text-xl"></i>' 
+                    : '<div class="w-5 h-5 rounded-full border-2 border-slate-300 dark:border-slate-600 transition-all"></div>'
+                }
+            `;
+
+            optionDiv.addEventListener('click', () => {
+                this.tempSelectedLang = lang;
+                this.renderModalLangList(searchQuery); // re-render to update selection style
+            });
+
+            listContainer.appendChild(optionDiv);
+        });
+
+        if (listContainer.children.length === 0) {
+            listContainer.innerHTML = `
+                <div class="text-center py-8 text-slate-400 dark:text-slate-500 text-sm">
+                    No languages found
+                </div>
+            `;
+        }
+    }
+
+    confirmLanguageSelection() {
+        if (!this.tempSelectedLang) {
+            this.closeLanguageModal();
+            return;
+        }
+
+        if (this.modalContext === 'source') {
+            this.selectedSourceLang = this.tempSelectedLang;
+            localStorage.setItem('selectedSourceLang', this.selectedSourceLang);
+            const btnSource = document.getElementById('btn-lang-source');
+            if (btnSource) btnSource.innerText = this.selectedSourceLang;
+        } else {
+            this.selectedTargetLang = this.tempSelectedLang;
+            localStorage.setItem('selectedTargetLang', this.selectedTargetLang);
+            const btnTarget = document.getElementById('btn-lang-target');
+            if (btnTarget) btnTarget.innerText = this.selectedTargetLang;
+        }
+
+        this.closeLanguageModal();
     }
 }

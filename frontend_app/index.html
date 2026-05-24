@@ -259,36 +259,21 @@
           <div class="p-4">
             <div class="relative mb-4">
               <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg"></i>
-              <input type="text" placeholder="Search languages..." class="w-full bg-slate-100 text-sm rounded-xl py-3 pl-10 pr-4 outline-none focus:ring-2 focus:ring-brand-blue/50">
+              <input type="text" id="lang-search" placeholder="Search languages..." class="w-full bg-slate-100 text-sm rounded-xl py-3 pl-10 pr-4 outline-none focus:ring-2 focus:ring-brand-blue/50 text-slate-700">
             </div>
             
             <div class="flex border-b border-slate-200 mb-2">
-              <button class="flex-1 py-2 text-sm font-semibold text-brand-blue border-b-2 border-brand-blue">Sign Language</button>
-              <button class="flex-1 py-2 text-sm font-semibold text-slate-400">Spoken Language</button>
+              <button id="tab-sign-lang" class="flex-1 py-2 text-sm font-semibold text-brand-blue border-b-2 border-brand-blue transition-all duration-300">Sign Language</button>
+              <button id="tab-spoken-lang" class="flex-1 py-2 text-sm font-semibold text-slate-400 transition-all duration-300">Spoken Language</button>
             </div>
           </div>
           
-          <div class="flex-1 overflow-y-auto px-2 pb-20">
-            <div class="lang-option flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 cursor-pointer">
-              <span class="text-sm font-medium text-slate-800">TSL (Thai Sign Language)</span>
-              <i class="ph-fill ph-check-circle text-brand-blue text-xl"></i>
-            </div>
-            <div class="lang-option flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 cursor-pointer">
-              <span class="text-sm font-medium text-slate-800">ASL (American Sign Language)</span>
-              <div class="w-5 h-5 rounded-full border-2 border-slate-300"></div>
-            </div>
-            <div class="lang-option flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 cursor-pointer">
-              <span class="text-sm font-medium text-slate-800">CSL (Chinese Sign Language)</span>
-              <div class="w-5 h-5 rounded-full border-2 border-slate-300"></div>
-            </div>
-            <div class="lang-option flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 cursor-pointer">
-              <span class="text-sm font-medium text-slate-800">BSL (British Sign Language)</span>
-              <div class="w-5 h-5 rounded-full border-2 border-slate-300"></div>
-            </div>
+          <div class="flex-1 overflow-y-auto px-2 pb-20 transition-opacity duration-200" id="modal-lang-list">
+            <!-- Dynamic options populated by JS -->
           </div>
           
           <div class="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-100 pb-safe">
-            <button class="w-full bg-brand-blue hover:bg-brand-dark text-white font-semibold py-3 rounded-xl shadow-md transition">Confirm Selection</button>
+            <button id="btn-confirm-lang" class="w-full bg-brand-blue hover:bg-brand-dark text-white font-semibold py-3 rounded-xl shadow-md transition">Confirm Selection</button>
           </div>
         </div>
       </div>
