@@ -5,8 +5,8 @@ import json
 import requests
 import concurrent.futures
 
-# PASTE YOUR API KEY HERE:
-GEMINI_API_KEY = "AIzaSyDO9O-Hz4CgBmq7YSwyt0TjGXKtsJd_Cdk"
+# PASTE YOUR API KEY HERE or set GEMINI_API_KEY environment variable:
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 def check_model_availability(model_name):
     test_url = f"https://generativelanguage.googleapis.com/v1/{model_name}:generateContent?key={GEMINI_API_KEY}"
