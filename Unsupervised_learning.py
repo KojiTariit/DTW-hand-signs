@@ -148,7 +148,7 @@ else:
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    n_groups = 10
+    n_groups = 52
     kmeans = KMeans(n_clusters=n_groups, n_init=10, random_state=42)
     labels = kmeans.fit_predict(X_scaled)
 

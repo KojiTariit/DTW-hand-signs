@@ -47,7 +47,9 @@ void evaluateCategory(SignDatabase& db, const std::string& category) {
 int main() {
     SignDatabase db;
     std::cout << "Loading templates...\n";
-    db.loadFromDirectory("templates");
+    db.loadFromDirectory("c:/Users/USER/Desktop/DTW/templates", true);
+    db.loadFromDirectory("c:/Users/USER/Desktop/DTW/templates_backup", false);
+    db.loadFromDirectory("c:/Users/USER/Desktop/DTW/templateGundum", false);
     
     evaluateCategory(db, "movement/single_hand");
     evaluateCategory(db, "movement/2_hands");

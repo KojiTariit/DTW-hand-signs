@@ -86,7 +86,7 @@ public:
             }
 
             // 4. Face Context (23) - WITH 4.0X SPATIAL WEIGHTING
-            if (f.has_face && f.has_pose) {
+            if (f.has_face) {
                 float dx_f = f.face.forehead.x - f.face.chin.x;
                 float dy_f = f.face.forehead.y - f.face.chin.y;
                 float dz_f = f.face.forehead.z - f.face.chin.z;
@@ -96,7 +96,9 @@ public:
                 Point3D i_rel = {hand.wrist_pos.x + lms[8].x, hand.wrist_pos.y + lms[8].y, hand.wrist_pos.z + lms[8].z};
                 Point3D m_rel = {hand.wrist_pos.x + lms[12].x, hand.wrist_pos.y + lms[12].y, hand.wrist_pos.z + lms[12].z};
                 Point3D t_rel = {hand.wrist_pos.x + lms[4].x, hand.wrist_pos.y + lms[4].y, hand.wrist_pos.z + lms[4].z};
-                Point3D anchors[] = {f.face.forehead, f.face.chin, f.face.nose, f.face.l_cheek, f.face.r_cheek, f.pose.l_ear, f.pose.r_ear};
+                
+                // Use face anchors. Pose anchors (ears) will be {0,0,0} if missing but the weight is on face.
+                Point3D anchors[] = {f.face.forehead, f.face.chin, f.face.nose, f.face.mouth, f.face.l_cheek, f.face.r_cheek, f.pose.l_ear};
 
                 auto dnorm = [&](Point3D a, Point3D b) {
                     return std::sqrt(std::pow(a.x-b.x,2)+std::pow(a.y-b.y,2)+std::pow(a.z-b.z,2)) / face_h;

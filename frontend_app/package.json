@@ -1,0 +1,29 @@
+{
+  "name": "frontend_app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "build:mobile": "vite build && npx cap sync"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^5.7.8",
+    "@tailwindcss/postcss": "^4.3.0",
+    "autoprefixer": "^10.5.0",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^3.4.15",
+    "vite": "^5.4.10"
+  },
+  "dependencies": {
+    "@capacitor/android": "^5.7.8",
+    "@capacitor/camera": "^5.0.10",
+    "@capacitor/core": "^5.7.8",
+    "@capacitor/haptics": "^5.0.8",
+    "@capacitor/ios": "^5.7.8",
+    "@capacitor/status-bar": "^5.0.8",
+    "@mediapipe/tasks-vision": "^0.10.35"
+  }
+}

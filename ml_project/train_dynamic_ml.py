@@ -129,6 +129,11 @@ def main():
                     if feat is not None:
                         X.append(feat)
                         y.append(sign)
+                        
+                        # Data Augmentation (Jittering) to double the data and add robustness
+                        jittered = [val + np.random.normal(0, 0.002) for val in feat]
+                        X.append(jittered)
+                        y.append(sign)
             except Exception as e:
                 print(f"Skipping corrupt or empty file: {f}")
 
@@ -140,8 +145,8 @@ def main():
     
     print(f"Loaded {len(X)} frames from dynamic templates.")
     
-    # Train model (Reduced complexity to fit in C++ compiler memory)
-    clf = RandomForestClassifier(n_estimators=80, max_depth=10, random_state=42)
+    # Uncrippled model - Now running at full depth and density since we load it from JSON!
+    clf = RandomForestClassifier(n_estimators=120, max_depth=20, class_weight='balanced', random_state=42)
     clf.fit(X, y)
     
     acc = accuracy_score(y, clf.predict(X)) * 100
@@ -152,9 +157,6 @@ def main():
     # Dump classes directly as list for C++ string matching
     classes_list = list(clf.classes_)
     joblib.dump(classes_list, "dynamic_ml_classes.pkl")
-    
-    # Write a simple text file of classes for C++ to read easily, or we can hardcode it via m2cgen?
-    # Actually, export_dynamic_cpp.py will read the pkl and generate the string array in C++.
     
     print("Model Exported -> 'dynamic_ml_model.pkl'")
 

@@ -18,13 +18,15 @@ public:
     std::map<std::string, std::map<std::string, std::vector<std::vector<float>>>> categorized_templates;
     std::map<std::string, int> file_to_cluster;
 
-    void loadFromDirectory(const std::string& rootPath) {
-        categorized_templates.clear();
-        file_to_cluster.clear();
+    void loadFromDirectory(const std::string& rootPath, bool clear_db = true) {
+        if (clear_db) {
+            categorized_templates.clear();
+            file_to_cluster.clear();
+        }
 
         // --- NEW: Load Cluster Mapping ---
         std::string mapPath = "model_output/file_cluster_mapping.json";
-        if (fs::exists(mapPath)) {
+        if (clear_db && fs::exists(mapPath)) {
             std::ifstream f(mapPath);
             json mapData = json::parse(f);
             for (auto const& [filename, clusterId] : mapData.items()) {
@@ -62,8 +64,12 @@ public:
         }
         
         int total_signs = 0;
-        for (const auto& cat : categorized_templates) total_signs += cat.second.size();
-        std::cout << "--- Scan Complete. Total Signs: " << total_signs << " ---" << std::endl;
+        std::cout << "--- Scan Complete. Categories Found: " << categorized_templates.size() << " ---" << std::endl;
+        for (const auto& cat : categorized_templates) {
+            std::cout << "  [FOLDER] " << std::left << std::setw(25) << cat.first << ": " << cat.second.size() << " signs" << std::endl;
+            total_signs += cat.second.size();
+        }
+        std::cout << "--- Total Database Capacity: " << total_signs << " signs ---" << std::endl;
     }
 
 

@@ -37,12 +37,8 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo 4/5 [TRANSPILING] Exporting "Knowledge" to C++ Header...
-
-
-python ml_project/export_cpp.py
-python ml_project/export_dynamic_cpp.py
-
+echo 4/5 [TRANSPILING] Exporting Forests to JSON...
+python export_forests.py
 
 if %ERRORLEVEL% NEQ 0 (
     echo !! Export Failed !!
@@ -51,16 +47,15 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo 5/5 [COMPILING] Baking new brain into scrap_receiver.exe...
-echo NOTE: Make sure scrap_receiver.exe is CLOSED!
+echo 5/5 [COMPILING] Baking new brains into scrap_receiver.exe and continuous_receiver.exe...
+echo NOTE: Make sure BOTH receivers are CLOSED!
 
-g++ -O2 scrap_receiver.cpp -o scrap_receiver.exe -lws2_32 -Wl,--stack,16777216
-
-
+g++ -O2 scrap_receiver.cpp -o scrap_receiver.exe -lws2_32
+g++ -O2 continuous_receiver.cpp -o continuous_receiver.exe -lws2_32
 
 if %ERRORLEVEL% NEQ 0 (
     echo !! Compilation Failed !!
-    echo Check if scrap_receiver.exe is still open.
+    echo Check if scrap_receiver.exe or continuous_receiver.exe is still open.
     pause
     exit /b %ERRORLEVEL%
 )

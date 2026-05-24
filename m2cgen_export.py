@@ -10,8 +10,8 @@ def export():
         
     model = joblib.load("static_ml_model.pkl")
     classes = joblib.load("static_ml_classes.pkl")
-    
-    print(f"Exporting model with {len(classes)} classes...")
+    n_features = model.n_features_in_
+    print(f"Exporting model with {len(classes)} classes and {n_features} features...")
     
     # 2. Generate C++ code
     code = m2c.export_to_c(model)
@@ -42,9 +42,9 @@ public:
 
     static std::string predict(const std::vector<float>& features) {
         double output[""" + str(len(classes)) + """];
-        double input_arr[77];
+        double input_arr[""" + str(n_features) + """];
         
-        for(size_t i=0; i<features.size(); ++i) {
+        for(size_t i=0; i<features.size() && i<""" + str(n_features) + """; ++i) {
             input_arr[i] = features[i];
         }
         

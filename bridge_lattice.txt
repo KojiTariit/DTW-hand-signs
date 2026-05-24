@@ -1,3 +1,3 @@
-Word 1: { Grandma1_Tonkla, Mom2_Tonkla, Mom2 }
-Word 2: { Like2, Like1, Like (1) }
-Word 3: { Go2, run_2, run_3 }
+Word 1: { Grandma_Tonkla, Grandma1_Tonkla, Mom2_Tonkla }
+Word 2: { Like1, Like2, Drink2 }
+Word 3: { run_3, run_2, Go1 }

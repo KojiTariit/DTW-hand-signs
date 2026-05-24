@@ -108,6 +108,21 @@ def extract_features(frame):
     else:
         features.extend([0.0, 0.0, 0.0])
 
+    # 8. Orientation Highlighters (2 features: Index and Middle X/Y Ratios)
+    idx_ratio, mid_ratio = 0.0, 0.0
+    for i, (tip_idx, mcp_idx) in enumerate([(8, 5), (12, 9)]):
+        dx = abs(pts[tip_idx][0] - pts[mcp_idx][0])
+        dy = abs(pts[tip_idx][1] - pts[mcp_idx][1])
+        ratio = float(dx / (dx + dy + 1e-6))
+        features.append(ratio)
+        if i == 0: idx_ratio = ratio
+        else: mid_ratio = ratio
+
+    # 9. FEATURE BOOSTING: Duplicate highlighters 10x to force AI focus
+    for _ in range(10):
+        features.append(idx_ratio)
+        features.append(mid_ratio)
+
     return features
 
 def main():
@@ -129,18 +144,34 @@ def main():
         sign = os.path.basename(f).split('.')[0].split('_')[0]
         with open(f, 'r') as jf:
             try:
-                for frame in json.load(jf):
+                frames = json.load(jf)
+                if len(frames) < 5: continue
+                
+                # Use only the middle 60% of frames (Auto-Trim)
+                start_idx = int(len(frames) * 0.2)
+                end_idx = int(len(frames) * 0.8)
+                
+                for frame in frames[start_idx:end_idx]:
                     if frame.get("hands"):
-                        X.append(extract_features(frame))
+                        feat = extract_features(frame)
+                        X.append(feat)
                         y.append(sign)
+                        
+                        # Data Augmentation (Jittering)
+                        jittered_feat = [min(max(val + np.random.normal(0, 0.002), -1.0), 1.0) for val in feat]
+                        X.append(jittered_feat)
+                        y.append(sign)
+                        
             except Exception as e:
-                print(f"Skipping corrupt or empty file: {f}")
+                print(f"Skipping {f}: {e}")
 
+    print(f"Training on {len(X)} augmented samples...")
     X, y = np.array(X), np.array(y)
-    clf = RandomForestClassifier(n_estimators=80, max_depth=10, random_state=42)
+    clf = RandomForestClassifier(n_estimators=300, max_depth=None, class_weight='balanced', random_state=42)
     clf.fit(X, y)
     
-    print(f"Training complete. Features: {len(X[0])}. Self-Accuracy: {accuracy_score(y, clf.predict(X)) * 100:.2f}%")
+    acc = accuracy_score(y, clf.predict(X)) * 100
+    print(f"Training complete. Features: {len(X[0])}. Self-Accuracy: {acc:.2f}%")
 
     joblib.dump(clf, "static_ml_model.pkl")
     joblib.dump(clf.classes_, "static_ml_classes.pkl")

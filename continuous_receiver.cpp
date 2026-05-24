@@ -8,10 +8,13 @@
 #include "json.hpp"
 #include "SignDatabase.hpp"
 #include "DtwEngine.hpp"
-#include "StaticSignClassifier.hpp"
-#include "DynamicSignClassifier.hpp"
+#include "ForestClassifier.hpp"
 
 using json = nlohmann::json;
+float current_ml_power = 0.75f; // Global state for live tuning
+
+ForestClassifier static_classifier;
+ForestClassifier dynamic_classifier;
 
 // --- 1. MATH HELPERS ---
 float magnitude(const Point3D& v) {
@@ -140,6 +143,23 @@ std::vector<float> extract_ml_features(const Frame& f) {
         features.push_back(0.0f); features.push_back(0.0f); features.push_back(0.0f);
     }
 
+    // 8. Orientation Highlighters (2 Features: Index and Middle X/Y Ratios)
+    int highlighter_pairs[2][2] = {{8, 5}, {12, 9}};
+    float idx_ratio = 0.0f, mid_ratio = 0.0f;
+    for (int i = 0; i < 2; ++i) {
+        float dx = std::abs(lms[highlighter_pairs[i][0]].x - lms[highlighter_pairs[i][1]].x);
+        float dy = std::abs(lms[highlighter_pairs[i][0]].y - lms[highlighter_pairs[i][1]].y);
+        float ratio = dx / (dx + dy + 1e-6f);
+        features.push_back(ratio);
+        if (i == 0) idx_ratio = ratio; else mid_ratio = ratio;
+    }
+
+    // 9. FEATURE BOOSTING: Duplicate highlighters 10x to force AI focus
+    for (int k = 0; k < 10; ++k) {
+        features.push_back(idx_ratio);
+        features.push_back(mid_ratio);
+    }
+
     return features;
 }
 
@@ -198,7 +218,24 @@ int main() {
     std::cout << "--- SIGN RECOGNITION ENGINE V3.5 (REVOLUTION) ---" << std::endl;
     
     SignDatabase db;
-    db.loadFromDirectory("c:/Users/USER/Desktop/DTW/templates");
+    std::cout << "[SYSTEM] Initializing Template Database..." << std::endl;
+    db.loadFromDirectory("templates", true);
+    db.loadFromDirectory("templates_backup", false);
+    db.loadFromDirectory("templateGundum", false);
+    
+    // Explicitly check for a root 'movement' folder if it exists
+    if (std::filesystem::exists("movement")) {
+        std::cout << "[SYSTEM] Found standalone movement folder. Merging..." << std::endl;
+        db.loadFromDirectory("movement", false);
+    }
+
+    std::cout << "[SYSTEM] Initializing Machine Learning Forests..." << std::endl;
+    if (!static_classifier.load("model_output/static_forest.json")) {
+        std::cerr << "[WARNING] Failed to load static forest model!" << std::endl;
+    }
+    if (!dynamic_classifier.load("model_output/dynamic_forest.json")) {
+        std::cerr << "[WARNING] Failed to load dynamic forest model!" << std::endl;
+    }
 
     ClusterModel cluster_brain;
     bool cluster_enabled = cluster_brain.load("model_output/cluster_model.json");
@@ -243,6 +280,10 @@ int main() {
             try {
                 json data = json::parse(message);
                 
+                if (data.contains("ml_power")) {
+                    current_ml_power = data["ml_power"];
+                }
+                
                 if (data.contains("type") && data["type"] == "END_OF_SIGN") {
                     std::cout << "\n[SIGN COMPLETE] Processing " << current_sign_buffer.size() << " frames." << std::endl;
                     
@@ -264,24 +305,31 @@ int main() {
                             
                             if (!init_done && frame_hands > 0) {
                                 for (const auto& h : f.hands) {
-                                    start_wrist.push_back(h.wrist_pos);
-                                    start_shape.push_back(h.landmarks);
+                                    if (h.is_present) {
+                                        start_wrist.push_back(h.wrist_pos);
+                                        start_shape.push_back(h.landmarks);
+                                    } else {
+                                        start_wrist.push_back({-1000, -1000, -1000}); // Sentinel for missing hand
+                                        start_shape.push_back({});
+                                    }
                                 }
                                 init_done = true;
                             }
 
                             if (init_done) {
                                 for (size_t i = 0; i < f.hands.size() && i < start_wrist.size(); ++i) {
-                                    float dx = f.hands[i].wrist_pos.x - start_wrist[i].x;
-                                    float dy = f.hands[i].wrist_pos.y - start_wrist[i].y;
-                                    float dz = f.hands[i].wrist_pos.z - start_wrist[i].z;
-                                    max_wrist_dist = std::max(max_wrist_dist, std::sqrt(dx*dx + dy*dy + dz*dz));
+                                    if (f.hands[i].is_present && start_wrist[i].x != -1000) {
+                                        float dx = f.hands[i].wrist_pos.x - start_wrist[i].x;
+                                        float dy = f.hands[i].wrist_pos.y - start_wrist[i].y;
+                                        float dz = f.hands[i].wrist_pos.z - start_wrist[i].z;
+                                        max_wrist_dist = std::max(max_wrist_dist, std::sqrt(dx*dx + dy*dy + dz*dz));
 
-                                    for (size_t j = 0; j < f.hands[i].landmarks.size() && j < start_shape[i].size(); ++j) {
-                                        float sx = f.hands[i].landmarks[j].x - start_shape[i][j].x;
-                                        float sy = f.hands[i].landmarks[j].y - start_shape[i][j].y;
-                                        float sz = f.hands[i].landmarks[j].z - start_shape[i][j].z;
-                                        max_shape_variance = std::max(max_shape_variance, std::sqrt(sx*sx + sy*sy + sz*sz));
+                                        for (size_t j = 0; j < f.hands[i].landmarks.size() && j < start_shape[i].size(); ++j) {
+                                            float sx = f.hands[i].landmarks[j].x - start_shape[i][j].x;
+                                            float sy = f.hands[i].landmarks[j].y - start_shape[i][j].y;
+                                            float sz = f.hands[i].landmarks[j].z - start_shape[i][j].z;
+                                            max_shape_variance = std::max(max_shape_variance, std::sqrt(sx*sx + sy*sy + sz*sz));
+                                        }
                                     }
                                 }
                             }
@@ -291,11 +339,10 @@ int main() {
                         std::string winner = "None";
                         float TH_WRIST = 0.20f; 
                         float TH_SHAPE = 0.12f; 
-                        bool is_dynamic = (current_sign_buffer.size() >= 12) && (max_wrist_dist > TH_WRIST || max_shape_variance > TH_SHAPE || max_hands >= 2);
+                        bool is_dynamic = (current_sign_buffer.size() >= 12) && (max_wrist_dist > TH_WRIST || max_shape_variance > TH_SHAPE);
 
                         if (is_dynamic) {
                             std::cout << "  >> Route: DYNAMIC (DTW Processor w/ Spatial Pruning) <<" << std::endl;
-                            float min_dist = 9999.0f;
                             
                             // NEW SPATIAL PRUNING: Frame Thresholding
                             int two_hand_frames = 0;
@@ -305,19 +352,8 @@ int main() {
                                 if (count >= 2) two_hand_frames++;
                             }
                             
-                            std::vector<std::string> movement_folders;
-                            if (two_hand_frames >= 15) {
-                                movement_folders = {"movement/2_hands"};
-                            } else if (two_hand_frames <= 2) {
-                                movement_folders = {"movement/single_hand"};
-                            } else {
-                                // Ambiguous case: Search both for safety
-                                movement_folders = {"movement/single_hand", "movement/2_hands"};
-                            }
-
-                            std::cout << "  >> Filter: Searching [";
-                            for(auto& m : movement_folders) std::cout << m << " ";
-                            std::cout << "] folders (2-hand frames: " << two_hand_frames << ")." << std::endl;
+                            std::string target_cat = (two_hand_frames >= 5) ? "movement/2_hands" : "movement/single_hand";
+                            std::cout << "  >> Filter: Searching [" << target_cat << "] folder only (2-hand frames: " << two_hand_frames << ")." << std::endl;
 
                             auto live_feat = DtwEngine::extractFeatures(current_sign_buffer);
 
@@ -328,9 +364,10 @@ int main() {
                                 // STRIDE OPTIMIZATION: Every 4th frame + heavy weight on "Money Frames"
                                 if (i % 4 == 0 || i == 10 || i == 15) {
                                     auto ml_feat = extract_ml_features(current_sign_buffer[i]);
-                                    if (ml_feat.size() == 120) {
-                                        auto probs = DynamicSignClassifier::predict_proba(ml_feat);
-                                        auto classes = DynamicSignClassifier::get_classes();
+                                    if (ml_feat.size() >= 120) {
+                                        std::vector<float> dyn_feat(ml_feat.begin(), ml_feat.begin() + 120);
+                                        auto probs = dynamic_classifier.predict_proba(dyn_feat);
+                                        auto classes = dynamic_classifier.get_classes();
                                         double weight = (i == 10 || i == 15) ? 5.0 : 1.0;
                                         for (size_t k = 0; k < probs.size(); ++k) {
                                             shape_votes[classes[k]] += probs[k] * weight;
@@ -342,11 +379,9 @@ int main() {
                             // --- NEW: CLUSTER PRUNING (Narrowing the search) ---
                             std::vector<int> allowed_clusters;
                             if (cluster_enabled) {
-                                 // --- CLUSTER PRUNING (Candidate Selection) ---
-                                 // We use frames 5 to N to avoid the "intro" movement noise.
                                  std::vector<float> avg_feat(120, 0.0f);
                                  int count = 0;
-                                 size_t start_f = (live_feat.size() > 10) ? 5 : 0; // Safety for short signs
+                                 size_t start_f = (live_feat.size() > 10) ? 5 : 0;
                                  for (size_t i = start_f; i < live_feat.size(); ++i) {
                                      for (int k = 0; k < 120; ++k) avg_feat[k] += live_feat[i][k];
                                      count++;
@@ -356,9 +391,6 @@ int main() {
                                  }
                                  
                                  allowed_clusters = cluster_brain.getTopClusters(avg_feat, 3);
-                                 std::cout << "[PRUNING] Candidate Clusters: ";
-                                 for (int id : allowed_clusters) std::cout << id << " ";
-                                 std::cout << std::endl;
                             }
 
                             // Find Top 10 ML Candidates for Fusion
@@ -367,16 +399,9 @@ int main() {
                                 return a.second > b.second;
                             });
                             
-                            // Normalize votes to "Confidence" (0.0 to 1.0)
                             double total_votes = 0;
                             for (const auto& v : sorted_votes) total_votes += v.second;
                             if (total_votes < 0.1) total_votes = 1.0;
-
-                            std::cout << "     [ML Confidence]: ";
-                            for (size_t i = 0; i < std::min((size_t)8, sorted_votes.size()); ++i) {
-                                std::cout << sorted_votes[i].first << " (" << (int)((sorted_votes[i].second/total_votes)*100) << "%), ";
-                            }
-                            std::cout << std::endl;
 
                             // Step 2: TRI-FACTOR FUSION (ML + CLUSTER + DTW)
                             struct FusionCandidate { std::string name; float fused_score; float dtw_dist; float ml_bonus; float cluster_bonus; std::string folder; };
@@ -386,16 +411,15 @@ int main() {
                             for (size_t i = 0; i < top_n; ++i) {
                                 std::string name = sorted_votes[i].first;
                                 double confidence = sorted_votes[i].second / total_votes;
-                                
                                 if (confidence < 0.001) continue;
 
                                 // 1. Calculate Cluster Proximity Bonus
                                 float cluster_bonus = 0.0f;
                                 if (cluster_enabled && !allowed_clusters.empty() && db.file_to_cluster.count(name)) {
-                                    int sign_cluster = db.file_to_cluster.at(name);
-                                    if (allowed_clusters.size() > 0 && sign_cluster == allowed_clusters[0]) cluster_bonus = 0.30f;
-                                    else if (allowed_clusters.size() > 1 && sign_cluster == allowed_clusters[1]) cluster_bonus = 0.24f;
-                                    else if (allowed_clusters.size() > 2 && sign_cluster == allowed_clusters[2]) cluster_bonus = 0.19f;
+                                     int sign_cluster = db.file_to_cluster.at(name);
+                                     if (allowed_clusters.size() > 0 && sign_cluster == allowed_clusters[0]) cluster_bonus = 0.30f;
+                                     else if (allowed_clusters.size() > 1 && sign_cluster == allowed_clusters[1]) cluster_bonus = 0.24f;
+                                     else if (allowed_clusters.size() > 2 && sign_cluster == allowed_clusters[2]) cluster_bonus = 0.19f;
                                 }
 
                                 // 2. Calculate ML Confidence Bonus (Exponential)
@@ -407,25 +431,25 @@ int main() {
                                 float dtw_dist = 999.0f;
                                 bool found = false;
                                 std::string actual_folder = "";
-                                if (db.categorized_templates.count("movement/single_hand") && db.categorized_templates.at("movement/single_hand").count(name)) {
-                                    actual_folder = "movement/single_hand";
-                                    auto template_feat = db.categorized_templates.at("movement/single_hand").at(name);
-                                    dtw_dist = DtwEngine::computeDualScore(live_feat, template_feat, 0.4f);
-                                    found = true;
-                                }
-                                else if (db.categorized_templates.count("movement/2_hands") && db.categorized_templates.at("movement/2_hands").count(name)) {
-                                    actual_folder = "movement/2_hands";
-                                    auto template_feat = db.categorized_templates.at("movement/2_hands").at(name);
-                                    dtw_dist = DtwEngine::computeDualScore(live_feat, template_feat, 0.4f);
-                                    found = true;
+                                std::vector<std::string> all_folders = {"movement/single_hand", "movement/2_hands"};
+                                for (const std::string& folder : all_folders) {
+                                    if (db.categorized_templates.count(folder) && db.categorized_templates.at(folder).count(name)) {
+                                        auto template_feat = db.categorized_templates.at(folder).at(name);
+                                        dtw_dist = DtwEngine::computeDualScore(live_feat, template_feat, 0.4f);
+                                        found = true;
+                                        actual_folder = folder;
+                                        break;
+                                    }
                                 }
 
                                 if (found) {
-                                    float fused = dtw_dist * (1.0f - total_bonus);
-                                    candidates.push_back({name, fused, dtw_dist, ml_bonus, cluster_bonus, actual_folder});
+                                     float movement_score = dtw_dist;
+                                     float ai_score = (1.0f - (float)confidence) * 50.0f - (cluster_bonus * 30.0f);
+                                     float fused = ((1.0f - current_ml_power) * movement_score) + (current_ml_power * ai_score);
+                                     candidates.push_back({name, fused, dtw_dist, ml_bonus, cluster_bonus, actual_folder});
                                 }
                             }
-                            
+                             
                             // Sort by Fused Score (Lowest wins)
                             std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
                                 return a.fused_score < b.fused_score;
@@ -440,20 +464,16 @@ int main() {
                                               << " (DTW: " << candidates[i].dtw_dist << ")" << std::endl;
                                 }
                                 
-                                // DETERMINING TARGET CATEGORY (From continuous hand logic)
-                                std::string target_cat = (two_hand_frames >= 15) ? "movement/2_hands" : "movement/single_hand";
-                                if (two_hand_frames > 2 && two_hand_frames < 15) target_cat = "AMBIGUOUS";
-
                                 // PRUNE & SHOW TOP 3 MATCHING HAND COUNT
                                 std::vector<FusionCandidate> pruned_list;
                                 for (const auto& cand : candidates) {
-                                    if (target_cat == "AMBIGUOUS" || cand.folder == target_cat) {
+                                    if (cand.folder == target_cat) {
                                         pruned_list.push_back(cand);
                                     }
                                 }
 
                                 if (!pruned_list.empty()) {
-                                    std::cout << "  >> [PRUNED SCOREBOARD - " << target_cat << "]:" << std::endl;
+                                    std::cout << "  >> [PRUNED SCOREBOARD - " << (target_cat == "movement/2_hands" ? "2 HANDS" : "1 HAND") << " ONLY]:" << std::endl;
                                     for(int i=0; i<std::min((int)3, (int)pruned_list.size()); ++i) {
                                         std::cout << "     " << (i+1) << ". " << pruned_list[i].name 
                                                   << " | Fused: " << pruned_list[i].fused_score 
@@ -462,35 +482,61 @@ int main() {
                                     winner = pruned_list[0].name;
                                 } else {
                                     winner = candidates[0].name; 
+                                    std::cout << "  !! WARNING: No " << target_cat << " signs found in ML shortlist. Using raw winner." << std::endl;
                                 }
 
                                 // Add Top Options to Lattice
-                                for(int i=0; i<std::min((int)3, (int)pruned_list.size()); ++i) {
-                                    wc.options.push_back(pruned_list[i].name);
+                                const auto& active_list = (!pruned_list.empty()) ? pruned_list : candidates;
+                                for(int i=0; i<std::min((int)3, (int)active_list.size()); ++i) {
+                                    wc.options.push_back(active_list[i].name);
                                 }
                                 if (!wc.options.empty()) sentence_lattice.push_back(wc);
+                            } else {
+                                if (!sorted_votes.empty()) {
+                                    winner = sorted_votes[0].first;
+                                    std::cout << "  !! WARNING: No templates found for shortlist candidates. Falling back to top ML class: " << winner << std::endl;
+                                    for (size_t i = 0; i < std::min((size_t)3, sorted_votes.size()); ++i) {
+                                        wc.options.push_back(sorted_votes[i].first);
+                                    }
+                                    if (!wc.options.empty()) sentence_lattice.push_back(wc);
+                                }
                             }
-
-
 
                         } else {
                             std::cout << "  >> Route: STATIC (ML Processor) <<" << std::endl;
                             const Frame& mid_f = current_sign_buffer[current_sign_buffer.size() / 2];
                             if (!mid_f.hands.empty()) {
                                 std::vector<float> ml_features = extract_ml_features(mid_f);
-                                winner = StaticSignClassifier::predict(ml_features);
-                                
-                                // Add single winner to Lattice (Static Route)
-                                if (winner != "NONE" && winner != "") {
-                                    wc.options.push_back(winner);
-                                    sentence_lattice.push_back(wc);
+                                if (ml_features.size() == 142) {
+                                    winner = static_classifier.predict(ml_features);
+                                    
+                                    // --- THE SPATIAL GUARD ---
+                                    float idx_r = ml_features[120];
+                                    float mid_r = ml_features[121];
+                                    float avg_angle = (idx_r + mid_r) / 2.0f;
+
+                                    if (avg_angle > 0.65f) { // Sideways Hand
+                                        if (winner == "R" || winner == "U" || winner == "V" || winner == "I") {
+                                            winner = "H"; // Force H
+                                        }
+                                    } else if (avg_angle < 0.35f) { // Vertical Hand
+                                        if (winner == "H") {
+                                            winner = "U"; // Force U
+                                        }
+                                    }
+
+                                    // Add single winner to Lattice (Static Route)
+                                    if (winner != "NONE" && winner != "" && winner != "None") {
+                                        wc.options.push_back(winner);
+                                        sentence_lattice.push_back(wc);
+                                    }
                                 }
                             }
                         }
                         
                         // Lattice is now handled inside each route above
 
-                        if (winner != "" && winner != last_prediction) {
+                        if (winner != "" && winner != last_prediction && winner != "None") {
                             if (!current_sentence.empty()) current_sentence += " ";
                             current_sentence += winner;
                             last_prediction = winner;

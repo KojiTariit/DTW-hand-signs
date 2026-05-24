@@ -3,9 +3,28 @@ import sys
 import argparse
 import json
 import requests
+import concurrent.futures
 
 # PASTE YOUR API KEY HERE:
 GEMINI_API_KEY = "AIzaSyDO9O-Hz4CgBmq7YSwyt0TjGXKtsJd_Cdk"
+
+def check_model_availability(model_name):
+    test_url = f"https://generativelanguage.googleapis.com/v1/{model_name}:generateContent?key={GEMINI_API_KEY}"
+    payload = {
+        "contents": [{
+            "parts": [{"text": "hi"}]
+        }]
+    }
+    headers = {'Content-Type': 'application/json'}
+    try:
+        r = requests.post(test_url, headers=headers, data=json.dumps(payload), timeout=5)
+        if r.status_code == 200:
+            return model_name, True, "OK"
+        else:
+            err_msg = r.json().get('error', {}).get('message', f"HTTP {r.status_code}")
+            return model_name, False, f"Failed ({r.status_code}: {err_msg})"
+    except Exception as e:
+        return model_name, False, f"Failed ({type(e).__name__}: {str(e)})"
 
 def polish_with_ai(lattice_data):
     # --- DEBUG: SHOW THE BRACKETS ---
@@ -32,12 +51,42 @@ def polish_with_ai(lattice_data):
                 print("[AI ERROR] No generation models found for this key.")
                 return
             
-            # Prefer Flash if available
-            target_model = available_models[0]
-            for m in available_models:
-                if "flash" in m.lower():
-                    target_model = m
-                    break
+            print(f"[AI] Testing {len(available_models)} candidate models in parallel...")
+            working_models = []
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                results = executor.map(check_model_availability, available_models)
+                for name, is_working, status_str in results:
+                    print(f"  - {name}: {status_str}")
+                    if is_working:
+                        working_models.append(name)
+            
+            if not working_models:
+                print("[AI ERROR] Checked all models but none of them are working/authorized.")
+                return
+
+            def get_model_rank(model_name):
+                model_name_lower = model_name.lower()
+                if "gemini-3.5-flash" in model_name_lower:
+                    return 0
+                elif "gemini-3.1-flash" in model_name_lower:
+                    return 1
+                elif "gemini-2.5-flash" in model_name_lower:
+                    return 2
+                elif "gemini-2.0-flash" in model_name_lower:
+                    return 3
+                elif "gemini-1.5-flash" in model_name_lower:
+                    return 4
+                elif "flash" in model_name_lower:
+                    return 5
+                elif "gemini" in model_name_lower:
+                    return 6
+                else:
+                    return 7
+
+            working_models.sort(key=get_model_rank)
+            target_model = working_models[0]
+            print(f"[AI] Selected best working model: {target_model}")
         else:
             print(f"[AI ERROR] Could not list models: {r_list.status_code}")
             return

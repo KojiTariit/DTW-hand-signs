@@ -7,11 +7,13 @@
 #include "json.hpp"
 #include "SignDatabase.hpp"
 #include "DtwEngine.hpp"
-#include "StaticSignClassifier.hpp"
-#include "DynamicSignClassifier.hpp"
+#include "ForestClassifier.hpp"
 
 using json = nlohmann::json;
 float current_ml_power = 0.75f; // Global state for live tuning
+
+ForestClassifier static_classifier;
+ForestClassifier dynamic_classifier;
 
 // --- 1. MATH HELPERS ---
 float magnitude(const Point3D& v) {
@@ -34,18 +36,16 @@ float dist3D(Point3D a, Point3D b) {
 // Extracts exactly what m2cgen expects (80 features)
 std::vector<float> extract_ml_features(const Frame& f) {
     std::vector<float> features;
-    if (f.hands.empty()) return features;
-    
-    const HandData* target_hand = nullptr;
+    const HandData* hand_ptr = nullptr;
     for (const auto& h : f.hands) {
-        if (h.is_present && h.landmarks.size() >= 21) {
-            target_hand = &h;
+        if (h.is_present && !h.landmarks.empty()) {
+            hand_ptr = &h;
             break;
         }
     }
-    if (!target_hand) return features;
+    if (!hand_ptr) return features;
     
-    const auto& hand = *target_hand;
+    const auto& hand = *hand_ptr;
     const auto& lms = hand.landmarks;
     
     Point3D p0 = lms[0];
@@ -140,6 +140,23 @@ std::vector<float> extract_ml_features(const Frame& f) {
         features.push_back(0.0f); features.push_back(0.0f); features.push_back(0.0f);
     }
 
+    // 8. Orientation Highlighters (2 Features: Index and Middle X/Y Ratios)
+    int highlighter_pairs[2][2] = {{8, 5}, {12, 9}};
+    float idx_ratio = 0.0f, mid_ratio = 0.0f;
+    for (int i = 0; i < 2; ++i) {
+        float dx = std::abs(lms[highlighter_pairs[i][0]].x - lms[highlighter_pairs[i][1]].x);
+        float dy = std::abs(lms[highlighter_pairs[i][0]].y - lms[highlighter_pairs[i][1]].y);
+        float ratio = dx / (dx + dy + 1e-6f);
+        features.push_back(ratio);
+        if (i == 0) idx_ratio = ratio; else mid_ratio = ratio;
+    }
+
+    // 9. FEATURE BOOSTING: Duplicate highlighters 10x to force AI focus
+    for (int k = 0; k < 10; ++k) {
+        features.push_back(idx_ratio);
+        features.push_back(mid_ratio);
+    }
+
     return features;
 }
 
@@ -198,7 +215,24 @@ int main() {
     std::cout << "--- SIGN RECOGNITION ENGINE V3.5 (REVOLUTION) ---" << std::endl;
     
     SignDatabase db;
-    db.loadFromDirectory("c:/Users/USER/Desktop/DTW/templates");
+    std::cout << "[SYSTEM] Initializing Template Database..." << std::endl;
+    db.loadFromDirectory("templates", true);
+    db.loadFromDirectory("templates_backup", false);
+    db.loadFromDirectory("templateGundum", false);
+    
+    // Explicitly check for a root 'movement' folder if it exists
+    if (std::filesystem::exists("movement")) {
+        std::cout << "[SYSTEM] Found standalone movement folder. Merging..." << std::endl;
+        db.loadFromDirectory("movement", false);
+    }
+
+    std::cout << "[SYSTEM] Initializing Machine Learning Forests..." << std::endl;
+    if (!static_classifier.load("model_output/static_forest.json")) {
+        std::cerr << "[WARNING] Failed to load static forest model!" << std::endl;
+    }
+    if (!dynamic_classifier.load("model_output/dynamic_forest.json")) {
+        std::cerr << "[WARNING] Failed to load dynamic forest model!" << std::endl;
+    }
 
     ClusterModel cluster_brain;
     bool cluster_enabled = cluster_brain.load("model_output/cluster_model.json");
@@ -253,24 +287,31 @@ int main() {
                             
                             if (!init_done && frame_hands > 0) {
                                 for (const auto& h : f.hands) {
-                                    start_wrist.push_back(h.wrist_pos);
-                                    start_shape.push_back(h.landmarks);
+                                    if (h.is_present) {
+                                        start_wrist.push_back(h.wrist_pos);
+                                        start_shape.push_back(h.landmarks);
+                                    } else {
+                                        start_wrist.push_back({-1000, -1000, -1000}); // Sentinel for missing hand
+                                        start_shape.push_back({});
+                                    }
                                 }
                                 init_done = true;
                             }
 
-                            if (init_done) {
+                             if (init_done) {
                                 for (size_t i = 0; i < f.hands.size() && i < start_wrist.size(); ++i) {
-                                    float dx = f.hands[i].wrist_pos.x - start_wrist[i].x;
-                                    float dy = f.hands[i].wrist_pos.y - start_wrist[i].y;
-                                    float dz = f.hands[i].wrist_pos.z - start_wrist[i].z;
-                                    max_wrist_dist = std::max(max_wrist_dist, std::sqrt(dx*dx + dy*dy + dz*dz));
+                                    if (f.hands[i].is_present && start_wrist[i].x != -1000) {
+                                        float dx = f.hands[i].wrist_pos.x - start_wrist[i].x;
+                                        float dy = f.hands[i].wrist_pos.y - start_wrist[i].y;
+                                        float dz = f.hands[i].wrist_pos.z - start_wrist[i].z;
+                                        max_wrist_dist = std::max(max_wrist_dist, std::sqrt(dx*dx + dy*dy + dz*dz));
 
-                                    for (size_t j = 0; j < f.hands[i].landmarks.size() && j < start_shape[i].size(); ++j) {
-                                        float sx = f.hands[i].landmarks[j].x - start_shape[i][j].x;
-                                        float sy = f.hands[i].landmarks[j].y - start_shape[i][j].y;
-                                        float sz = f.hands[i].landmarks[j].z - start_shape[i][j].z;
-                                        max_shape_variance = std::max(max_shape_variance, std::sqrt(sx*sx + sy*sy + sz*sz));
+                                        for (size_t j = 0; j < f.hands[i].landmarks.size() && j < start_shape[i].size(); ++j) {
+                                            float sx = f.hands[i].landmarks[j].x - start_shape[i][j].x;
+                                            float sy = f.hands[i].landmarks[j].y - start_shape[i][j].y;
+                                            float sz = f.hands[i].landmarks[j].z - start_shape[i][j].z;
+                                            max_shape_variance = std::max(max_shape_variance, std::sqrt(sx*sx + sy*sy + sz*sz));
+                                        }
                                     }
                                 }
                             }
@@ -280,7 +321,7 @@ int main() {
                         std::string winner = "None";
                         float TH_WRIST = 0.20f; 
                         float TH_SHAPE = 0.12f; 
-                        bool is_dynamic = (current_sign_buffer.size() >= 12) && (max_wrist_dist > TH_WRIST || max_shape_variance > TH_SHAPE || max_hands >= 2);
+                        bool is_dynamic = (current_sign_buffer.size() >= 12) && (max_wrist_dist > TH_WRIST || max_shape_variance > TH_SHAPE);
 
                         if (is_dynamic) {
                             std::cout << "  >> Route: DYNAMIC (DTW Processor w/ Spatial Pruning) <<" << std::endl;
@@ -304,9 +345,10 @@ int main() {
                             for (size_t i = 0; i < current_sign_buffer.size(); ++i) {
                                 if (i % 4 == 0 || i == 10 || i == 15) {
                                     auto ml_feat = extract_ml_features(current_sign_buffer[i]);
-                                    if (ml_feat.size() == 120) {
-                                        auto probs = DynamicSignClassifier::predict_proba(ml_feat);
-                                        auto classes = DynamicSignClassifier::get_classes();
+                                    if (ml_feat.size() >= 120) {
+                                        std::vector<float> dyn_feat(ml_feat.begin(), ml_feat.begin() + 120);
+                                        auto probs = dynamic_classifier.predict_proba(dyn_feat);
+                                        auto classes = dynamic_classifier.get_classes();
                                         double weight = (i == 10 || i == 15) ? 5.0 : 1.0;
                                         for (size_t k = 0; k < probs.size(); ++k) {
                                             shape_votes[classes[k]] += probs[k] * weight;
@@ -431,11 +473,30 @@ int main() {
                                 }
                             }
                         } else {
-                            std::cout << "  >> Route: STATIC (ML Processor) <<" << std::endl;
                             const Frame& mid_f = current_sign_buffer[current_sign_buffer.size() / 2];
                             if (!mid_f.hands.empty()) {
                                 std::vector<float> ml_features = extract_ml_features(mid_f);
-                                winner = StaticSignClassifier::predict(ml_features);
+                                if (ml_features.size() == 142) {
+                                    winner = static_classifier.predict(ml_features);
+                                    
+                                    // --- THE SPATIAL GUARD ---
+                                    float idx_r = ml_features[120];
+                                    float mid_r = ml_features[121];
+                                    float avg_angle = (idx_r + mid_r) / 2.0f;
+
+                                    if (avg_angle > 0.65f) { // Sideways Hand
+                                        if (winner == "R" || winner == "U" || winner == "V" || winner == "I") {
+                                            winner = "H"; // Force H
+                                        }
+                                    } else if (avg_angle < 0.35f) { // Vertical Hand
+                                        if (winner == "H") {
+                                            winner = "U"; // Force U
+                                        }
+                                    }
+                                    std::cout << ">>> PREDICTION: [ " << winner << " ] (Angle: " << (int)(avg_angle * 100) << "%)" << std::endl;
+                                    current_sign_buffer.clear();
+                                    continue;
+                                }
                             }
                         }
                         std::cout << ">>> PREDICTION: [ " << winner << " ] <<<" << std::endl;
